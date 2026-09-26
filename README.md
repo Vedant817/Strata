@@ -1,47 +1,68 @@
-# Astro Starter Kit: Minimal
+# Strata
 
-```sh
-npm create astro@latest -- --template minimal
+A publication for long-form that outlives its own publication date.
+
+Posts are **layered living documents**: they carry a visible revision history, render at
+three reader-chosen depths, and accept typed annotations pinned to a specific sentence *and*
+the specific revision that sentence belonged to.
+
+See [PLAN.md](./PLAN.md) for the product thesis, the data model, the roadmap and the
+explicit kill-criteria.
+
+## Stack
+
+- **Astro 7** (`output: 'server'`, `@astrojs/node` standalone) — HTML-first, islands only
+- **React 19** — six islands on an article page, budgeted
+- **Tailwind 4** via `@tailwindcss/vite` — CSS-first `@theme`, semantic tokens
+- **libsql (SQLite) + Drizzle** — 18 tables, zero external config to run locally
+- **Zod** — the typed block document is validated on read
+
+## Running it
+
+```bash
+npm install
+npm run db:seed      # creates data/strata.db and loads the canon
+npm run dev          # http://localhost:4321
 ```
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/withastro/astro/tree/latest/examples/minimal)
-[![Open with CodeSandbox](https://assets.codesandbox.io/github/button-edit-lime.svg)](https://codesandbox.io/p/sandbox/github/withastro/astro/tree/latest/examples/minimal)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/withastro/astro?devcontainer_path=.devcontainer/minimal/devcontainer.json)
+The seed is idempotent and safe to re-run after editing `src/seed/content.ts`.
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+## Commands
 
-## 🚀 Project Structure
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | Dev server |
+| `npm run build` | Production build |
+| `npm run preview` | Serve the production build |
+| `npm run check` | `astro check` + typecheck |
+| `npm run lint:design` | Fails the build on banned visual patterns (see below) |
+| `npm run db:seed` | Wipe and rebuild the database |
+| `npm run db:generate` | Generate a Drizzle migration from the schema |
+| `npm run db:studio` | Drizzle Studio |
 
-Inside of your Astro project, you'll see the following folders and files:
+## Design constraints
 
-```text
-/
-├── public/
-├── src/
-│   └── pages/
-│       └── index.astro
-└── package.json
-```
+Not enforced by taste — enforced by `npm run lint:design`, which fails on:
 
-Astro looks for `.astro` or `.md` files in the `src/pages/` directory. Each page is exposed as a route based on its file name.
+- `gradient()`, `backdrop-filter`, `text-shadow`, glow, `box-shadow` with blur > 8px
+- `border-radius` ≥ 12px, pill shapes
+- `transition: all`, `will-change` on non-compositing properties
+- AI-purple hues
+- interactive elements without a `:focus-visible` style
+- data-driven components missing an empty, loading or error state
 
-There's nothing special about `src/components/`, but that's where we like to put any Astro/React/Vue/Svelte/Preact components.
+The visual thesis is typography-first editorial: ink on paper, 1px hairlines, one accent
+(`#A63A24`), no elevation, no gloss. Reference points in PLAN.md §2.
 
-Any static assets, like images, can be placed in the `public/` directory.
+## Content model
 
-## 🧞 Commands
+A post body is a **typed block document**, not Markdown. This is what makes stable
+annotation anchors, author-declared depth layers, semantic diffs and per-block comprehension
+telemetry possible. `src/lib/blocks.ts` owns the schema; `src/seed/build.ts` is the authoring
+DSL used by the seed content.
 
-All commands are run from the root of the project, from a terminal:
+## Privacy
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
-
-## 👀 Want to learn more?
-
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+No third-party analytics scripts, no ad-tech cookies, no fingerprinting. Reading telemetry is
+first-party and aggregate-only, and is never surfaced to a writer for cohorts under 20 readers.
+`/privacy#forget` erases an anonymous reader's entire history on request.

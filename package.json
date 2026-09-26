@@ -5,15 +5,48 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro check && astro build",
-    "preview": "astro preview",
-    "astro": "astro"
+    "build": "astro build",
+    "preview": "node ./dist/server/entry.mjs",
+    "astro": "astro",
+    "check": "astro check",
+    "db:generate": "drizzle-kit generate",
+    "db:studio": "drizzle-kit studio",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:reset": "Remove-Item -Force data/strata.db -ErrorAction SilentlyContinue; npm run db:seed",
+    "lint:design": "node scripts/lint-design.mjs",
+    "verify": "npm run lint:design && npm run check"
   },
   "dependencies": {
     "@astrojs/check": "^0.5.10",
-    "@astrojs/tailwind": "^5.1.0",
-    "astro": "^4.5.9",
-    "tailwindcss": "^3.4.1",
-    "typescript": "^5.4.3"
+    "@astrojs/node": "^11.1.6",
+    "@astrojs/react": "^7.0.0",
+    "@astrojs/rss": "^4.0.19",
+    "@astrojs/sitemap": "^3.7.4",
+    "@fontsource-variable/ibm-plex-sans": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-serif": "^5.3.0",
+    "@libsql/client": "^0.18.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "astro": "^7.3.5",
+    "diff": "^9.0.0",
+    "drizzle-orm": "^0.45.3",
+    "nanoid": "^6.0.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.4.3",
+    "zod": "^4.6.5"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "drizzle-kit": "^0.31.11",
+    "tsx": "^4.23.15"
   }
 }

@@ -1,0 +1,109 @@
+---
+import { resolvePrefs, THEME_COOKIE, DENSITY_COOKIE, ANON_COOKIE, type ReaderPrefs } from '../lib/prefs';
+import SiteHeader from '../components/SiteHeader.astro';
+import SiteFooter from '../components/SiteFooter.astro';
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+  canonical?: string;
+  ogType?: string;
+  noindex?: boolean;
+  prefs?: ReaderPrefs;
+  /** Extra JSON-LD graph nodes, serialised by the caller. */
+  jsonLd?: unknown[];
+  bodyClass?: string;
+}
+
+const {
+  title,
+  description = 'Strata — long-form that admits it is out of date. Read at your depth, argue in the margins.',
+  canonical,
+  ogType = 'website',
+  noindex = false,
+  jsonLd = [],
+  bodyClass = '',
+} = Astro.props;
+
+const cookies = Astro.cookies.get(ANON_COOKIE)?.value;
+const anonId = cookies ?? crypto.randomUUID();
+if (!cookies) {
+  Astro.cookies.set(ANON_COOKIE, anonId, {
+    path: '/',
+    httpOnly: false,
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 24 * 365,
+  });
+}
+
+const prefs = Astro.props.prefs ?? resolvePrefs(Astro.cookies as never, anonId);
+const site = Astro.site ?? new URL('http://localhost:4321');
+const pageTitle = !title || title === 'Strata' ? 'Strata' : `${title} · Strata`;
+const canonicalUrl = canonical ? new URL(canonical, site).href : Astro.url.href;
+const graph = jsonLd.length
+  ? JSON.stringify({ '@context': 'https://schema.org', '@graph': jsonLd })
+  : null;
+---
+
+<!doctype html>
+<html lang="en" data-theme={prefs.theme} data-density={prefs.density}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+    <link rel="canonical" href={canonicalUrl} />
+    <meta name="theme-color" content={prefs.theme === 'ink' ? '#100f0d' : '#faf9f5'} />
+
+    <meta property="og:type" content={ogType} />
+    <meta property="og:site_name" content="Strata" />
+    <meta property="og:title" content={title ?? 'Strata'} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title ?? 'Strata'} />
+    <meta name="twitter:description" content={description} />
+
+    <link rel="alternate" type="application/rss+xml" title="Strata — all writing" href="/rss.xml" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+
+    {graph && <script type="application/ld+json" set:html={graph} />}
+
+    {/* Runs before first paint so a reader on a dark OS never sees a white flash. */}
+    <script is:inline define:vars={{ themeCookie: THEME_COOKIE, densityCookie: DENSITY_COOKIE }}>
+      (() => {
+        const read = (name) =>
+          (document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)')) || [])[1];
+        const stored = read(themeCookie);
+        if (stored === 'paper' || stored === 'ink') {
+          document.documentElement.dataset.theme = stored;
+        } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+          document.documentElement.dataset.theme = 'ink';
+        }
+        const d = read(densityCookie);
+        if (d) document.documentElement.dataset.density = d;
+      })();
+    </script>
+  </head>
+
+  <body class={bodyClass}>
+    <a
+      href="#main"
+      class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:bg-ink focus:px-3 focus:py-2 focus:text-paper"
+    >
+      Skip to content
+    </a>
+
+    <SiteHeader />
+
+    <main id="main" tabindex="-1">
+      <slot />
+    </main>
+
+    <SiteFooter />
+
+    <slot name="scripts" />
+  </body>
+</html>
