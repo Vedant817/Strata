@@ -86,6 +86,21 @@ const graph = jsonLd.length
         if (d) document.documentElement.dataset.density = d;
       })();
     </script>
+    {/* First-party error capture. There is no third-party analytics on this
+        site, which also means there is nowhere for a client-side exception to
+        go. Keep the last few on window so a broken island can be diagnosed
+        from the console instead of guessing. */}
+    <script is:inline>
+      (() => {
+        window.__strataErrors = [];
+        const keep = (kind, message, stack) => {
+          window.__strataErrors.push({ kind, message: String(message), stack: String(stack || '').slice(0, 600) });
+          if (window.__strataErrors.length > 20) window.__strataErrors.shift();
+        };
+        window.addEventListener('error', (e) => keep('error', e.message, e.error && e.error.stack));
+        window.addEventListener('unhandledrejection', (e) => keep('rejection', e.reason));
+      })();
+    </script>
   </head>
 
   <body class={bodyClass}>

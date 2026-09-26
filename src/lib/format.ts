@@ -85,6 +85,16 @@ export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/**
+ * A verb agreeing with a count: `verb(1, 'argues', 'argue')`.
+ *
+ * Hand-writing "1 note argues / 4 notes argue" is a classic place for a blog to
+ * look machine-made, and the pattern recurs on every count in the product.
+ */
+export function verb(n: number, one: string, many = one): string {
+  return new Intl.PluralRules('en', { type: 'cardinal' }).select(n) === 'one' ? one : many;
+}
+
 export function compactNumber(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;

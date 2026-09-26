@@ -3,6 +3,7 @@ import Base from '../../layouts/Base.astro';
 import Prose from '../../components/Prose.astro';
 import StatusBadge from '../../components/StatusBadge.astro';
 import DepthDial from '../../components/islands/DepthDial';
+import Marginalia from '../../components/islands/Marginalia';
 import {
   getAdjacent,
   getLastReceipt,
@@ -12,10 +13,13 @@ import {
   incrementViews,
   recordRead,
 } from '../../lib/repo/posts';
+import { getIdentity } from '../../lib/repo/auth';
+import { countByPost, countParticipants, listAnnotations } from '../../lib/repo/annotations';
+import { blockToPlainText } from '../../lib/blocks';
 import { resolvePrefs, ANON_COOKIE, type Depth } from '../../lib/prefs';
 import { minutesAtDepth } from '../../lib/blocks';
 import { diffStats } from '../../lib/diff';
-import { ago, longDate, shortAgo, plural } from '../../lib/format';
+import { ago, longDate, shortAgo, plural, verb } from '../../lib/format';
 import { stripInline } from '../../lib/inline';
 
 const { slug } = Astro.params;
@@ -25,6 +29,7 @@ if (!post) return new Response(null, { status: 404, statusText: 'Not found' });
 // Reading state. The page renders at the depth the reader chose, server-side —
 // the dial is an enhancement over a complete document, not the source of it.
 const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+const identity = await getIdentity(Astro.cookies);
 const prefs = resolvePrefs(Astro.cookies as never, anonId);
 const depth: Depth = prefs.depth;
 
@@ -48,7 +53,7 @@ const minutes = {
 // Telemetry must never block or fail the response.
 void (async () => {
   try {
-    await recordRead({ postId: post.id, versionId: post.version.id, anonId });
+    await recordRead({ postId: post.id, versionId: post.version.id, anonId, userId: identity.userId });
     await incrementViews(post.id);
   } catch (err) {
     console.error('[strata] read receipt failed', err);
@@ -64,6 +69,23 @@ const hasChangesSince = Boolean(
 const stats = diffStats(view.diff);
 const reviewed = post.lastReviewedAt ? shortAgo(post.lastReviewedAt) : null;
 const { newer, older } = await getAdjacent(post.id);
+
+// Marginalia, resolved against the text the reader is actually looking at.
+const blockTexts = new Map(doc.map((b) => [b.id, blockToPlainText(b)]));
+const allNotes = await listAnnotations(post.id, blockTexts, {
+  anonId,
+  authorId: identity.userId,
+  currentVersionId: post.currentVersionId ?? '',
+});
+const rootNotes = allNotes.filter((n) => !n.parentId);
+const notesByBlock: Record<string, typeof rootNotes> = {};
+for (const note of rootNotes) {
+  (notesByBlock[note.blockId] ??= []).push(note);
+}
+const participants = await countParticipants(post.id);
+const myNoteCount = allNotes.filter((n) => n.isMine).length;
+const isPostAuthor = identity.userId === post.authorId;
+const staleNotes = allNotes.filter((n) => n.onOlderRevision).length;
 
 const title = isViewingOld ? `${post.title} (revision ${view.current.versionNumber})` : post.title;
 const description = post.seoDescription || stripInline(post.dek);
@@ -90,7 +112,7 @@ const jsonLd = [
 <Base title={title} description={description} ogType="article" prefs={prefs} jsonLd={jsonLd}>
   <article data-depth-host data-depth={depth} data-post-id={post.id} data-version={view.current.versionNumber}>
     <header class="shell border-b border-rule pt-10 pb-8">
-      <div class="measure">
+      <div class="article-body">
         <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
           <StatusBadge status={post.status} />
           {post.topicName && <a href="/topics" class="meta no-underline hover:text-ink">{post.topicName}</a>}
@@ -125,7 +147,7 @@ const jsonLd = [
     </header>
 
     <div class="shell">
-      <div class="measure mt-6 space-y-3">
+      <div class="article-body mt-6 space-y-3">
         {
           hasChangesSince && !isViewingOld && (
             <div class="border border-accent bg-accent-soft px-4 py-3">
@@ -168,17 +190,19 @@ const jsonLd = [
     </div>
 
     <div class="shell mt-8">
-      <div class="measure">
+      <div class="article-body">
         <Prose
           blocks={doc}
           diffSegments={isViewingOld && view.compared ? diffByBlock : undefined}
           changeStatus={isViewingOld && view.compared ? changeByBlock : undefined}
+          notes={notesByBlock}
+          postSlug={post.slug}
         />
       </div>
     </div>
 
     <div class="shell mt-16">
-      <div class="measure space-y-10">
+      <div class="article-body space-y-10">
         <section aria-labelledby="depth-heading" class="border-t border-rule pt-6">
           <h2 id="depth-heading" class="meta mb-3">How deep do you want this?</h2>
           <DepthDial
@@ -246,18 +270,43 @@ const jsonLd = [
         </section>
 
         <section id="marginalia" aria-labelledby="marginalia-heading" class="border-t border-rule pt-6">
-          <h2 id="marginalia-heading" class="meta">Marginalia</h2>
-          <p class="mt-2 text-[0.9375rem] text-ink-2">
+          <div class="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 id="marginalia-heading" class="meta">Marginalia</h2>
             {
-              post.annotationTotal > 0
-                ? `${plural(post.annotationTotal, 'note')} attached to specific sentences in this post.`
-                : 'No notes yet.'
-            }{' '}
-            Select any sentence in the text to add your own.
+              myNoteCount > 0 && (
+                <a href="#marginalia" class="meta no-underline hover:text-ink">
+                  {plural(myNoteCount, 'note')} of yours on this post
+                </a>
+              )
+            }
+          </div>
+
+          <p class="mt-2 max-w-xl text-[0.9375rem] leading-relaxed text-ink-2">
+            {
+              allNotes.length === 0
+                ? 'No notes yet. Select any sentence in the text to leave the first one — no account needed.'
+                : `${plural(allNotes.length, 'note')} from ${plural(participants, 'reader')}, attached to specific sentences. Select any sentence in the text to add yours.`
+            }
           </p>
+
+          {
+            allNotes.some((n) => n.onOlderRevision) && (
+              <p class="mt-2 max-w-xl text-[0.875rem] leading-relaxed text-ochre">
+                {`${plural(staleNotes, 'note')} here ${verb(staleNotes, 'argues', 'argue')} with an earlier revision of this post and ${verb(staleNotes, 'links', 'link')} to it.`}
+              </p>
+            )
+          }
         </section>
       </div>
     </div>
+
+    <Marginalia
+      client:idle
+      postId={post.id}
+      versionId={view.current.id}
+      canWriteAuthorNote={isPostAuthor}
+      signedInAs={identity.handle}
+    />
 
     {
       (newer || older) && (

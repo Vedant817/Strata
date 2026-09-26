@@ -1,0 +1,119 @@
+---
+import { relativeTime } from '../lib/format';
+import type { AnnotationKind } from '../lib/db/schema';
+
+interface Props {
+  id: string;
+  kind: AnnotationKind;
+  body: string;
+  authorName: string;
+  authorHandle: string | null;
+  createdAt: number;
+  isAuthor: boolean;
+  isAccepted: boolean;
+  onOlderRevision: boolean;
+  anchorLost: boolean;
+  quote: string;
+  versionNumber: number;
+  postSlug: string;
+  reactions?: { useful: number; insightful: number; source: number };
+}
+
+const {
+  id,
+  kind,
+  body,
+  authorName,
+  authorHandle,
+  createdAt,
+  isAuthor,
+  isAccepted,
+  onOlderRevision,
+  anchorLost,
+  quote,
+  versionNumber,
+  postSlug,
+  reactions = { useful: 0, insightful: 0, source: 0 },
+} = Astro.props;
+
+const LABELS: Record<AnnotationKind, string> = {
+  comment: 'Comment',
+  correction: 'Correction',
+  extension: 'Extension',
+  disagreement: 'Disagreement',
+  worked_example: 'Worked example',
+  update: 'Update',
+  author_note: 'Author’s note',
+};
+---
+
+<article
+  id={`note-${id}`}
+  class:list={[
+    'border-b border-rule py-3 last:border-b-0 first:pt-0',
+    isAuthor && 'note-author pl-3',
+  ]}
+  data-note-id={id}
+  data-note-kind={kind}
+>
+  <p class="meta flex flex-wrap items-center gap-x-2">
+    <span class:list={['note-kind-' + kind]}>
+      {LABELS[kind]}
+      {isAccepted && <span class="text-pine"> · accepted</span>}
+    </span>
+  </p>
+
+  {quote && (
+    <blockquote class="mt-1.5 border-l-2 border-rule-strong pl-2 text-[0.8125rem] leading-snug text-ink-3 italic">
+      {quote}
+    </blockquote>
+  )}
+
+  <p class="mt-1.5 text-[0.875rem] leading-relaxed text-ink-2">{body}</p>
+
+  <p class="meta mt-1.5 flex flex-wrap items-center gap-x-2">
+    {
+      authorHandle ? (
+        <a href={`/a/${authorHandle}`} class="no-underline hover:text-ink">
+          {authorName}
+        </a>
+      ) : (
+        <span>{authorName}</span>
+      )
+    }
+    <span aria-hidden="true">·</span>
+    <span>{relativeTime(createdAt)}</span>
+  </p>
+
+  {
+    onOlderRevision && (
+      <p class="mt-1.5 text-[0.75rem] leading-snug text-ochre">
+        <a href={`/w/${postSlug}?rev=${versionNumber}#note-${id}`} class="no-underline hover:underline">
+          This note is on revision {versionNumber} — read that version to see what it argued with →
+        </a>
+      </p>
+    )
+  }
+
+  {
+    anchorLost && (
+      <p class="mt-1.5 text-[0.75rem] leading-snug text-ink-3">
+        The sentence this note was attached to has since been rewritten out of the post.
+      </p>
+    )
+  }
+
+  {
+    (reactions.useful > 0 || reactions.insightful > 0 || reactions.source > 0) && (
+      <p class="meta mt-1.5">
+        {[
+          reactions.useful > 0 && `${reactions.useful} useful`,
+          reactions.insightful > 0 && `${reactions.insightful} insightful`,
+          reactions.source > 0 && `${reactions.source} sourced`,
+        ]
+          .filter(Boolean)
+          .join(' · ')}
+      </p>
+    )
+  }
+</article>

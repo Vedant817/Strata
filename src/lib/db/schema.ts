@@ -76,6 +76,34 @@ export const readerProfiles = sqliteTable('reader_profiles', {
   createdAt: integer('created_at').notNull().default(now),
 });
 
+/**
+ * Handle claims. Anonymous-first means a reader can write notes before having
+ * an identity, so claiming a handle is a deferred, out-of-band step: the reader
+ * asks for a handle, gets a single-use token, and the token is redeemed later
+ * to create the account and backfill every note written from that browser.
+ *
+ * There is no password anywhere in this table or in `users`. A handle is
+ * something you claim and can lose; it is not a credential.
+ */
+export const handleClaims = sqliteTable(
+  'handle_claims',
+  {
+    id: text('id').primaryKey(),
+    handle: text('handle').notNull(),
+    email: text('email').notNull(),
+    /** The browser that asked, so notes can be attached on redemption. */
+    anonId: text('anon_id').notNull(),
+    token: text('token').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    redeemedAt: integer('redeemed_at'),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [
+    uniqueIndex('handle_claims_token_uq').on(t.token),
+    index('handle_claims_anon_idx').on(t.anonId),
+  ],
+);
+
 /* -------------------------------------------------------------------------- */
 /* Posts                                                                       */
 /* -------------------------------------------------------------------------- */
@@ -243,9 +271,16 @@ export const annotations = sqliteTable(
     body: text('body').notNull(),
     kind: text('kind', { enum: ANNOTATION_KINDS }).notNull().default('comment'),
     parentId: text('parent_id'),
-    authorId: text('author_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * Anonymous-first. A note exists before anyone has an account — that is the
+     * whole point of the reading loop — so both of these are nullable and at
+     * least one is always set. A claimed note keeps its anonId so that claiming
+     * can backfill rather than orphan.
+     */
+    authorId: text('author_id').references(() => users.id, { onDelete: 'set null' }),
+    anonId: text('anon_id'),
+    /** Pseudonym a reader typed for themselves. Used until they claim a handle. */
+    guestName: text('guest_name'),
     status: text('status', { enum: ['visible', 'hidden', 'deleted'] })
       .notNull()
       .default('visible'),
@@ -261,6 +296,7 @@ export const annotations = sqliteTable(
     index('annotations_block_idx').on(t.postId, t.blockId),
     index('annotations_version_idx').on(t.versionId),
     index('annotations_parent_idx').on(t.parentId),
+    index('annotations_anon_idx').on(t.anonId),
   ],
 );
 

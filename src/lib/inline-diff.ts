@@ -15,7 +15,10 @@ import { escapeHtml, renderInline } from './inline';
 
 export interface Token {
   key: string;
+  /** Pre-rendered, escaped HTML for this token. */
   html: string;
+  /** The raw source text, so character offsets can be reconstructed. */
+  text: string;
 }
 
 const INLINE_PATTERN =
@@ -31,7 +34,7 @@ export function tokenizeInline(src: string): Token[] {
     // Keep whitespace as its own token so a diff can reconstruct spacing.
     for (const piece of run.split(/(\s+)/)) {
       if (!piece) continue;
-      out.push({ key: `p${n++}:${piece}`, html: escapeHtml(piece) });
+      out.push({ key: `p${n++}:${piece}`, html: escapeHtml(piece), text: piece });
     }
   };
 
@@ -40,11 +43,51 @@ export function tokenizeInline(src: string): Token[] {
   while ((m = INLINE_PATTERN.exec(src)) !== null) {
     if (m.index > cursor) pushProse(src.slice(cursor, m.index));
     const raw = m[0];
-    out.push({ key: `m${n++}:${raw}`, html: renderInline(raw) });
+    out.push({ key: `m${n++}:${raw}`, html: renderInline(raw), text: raw });
     cursor = m.index + raw.length;
   }
   if (cursor < src.length) pushProse(src.slice(cursor));
   return out;
+}
+
+/**
+ * Render source with [start, end) wrapped in a highlight.
+ *
+ * Token-based, so a highlight never lands mid-code-span and leaves a stray
+ * backtick behind. A range that partially covers a token snaps outward to the
+ * token boundary: highlighting a whole `code` span or none of it is correct,
+ * highlighting three of its seven characters is not representable.
+ */
+export function renderWithHighlight(
+  src: string,
+  start: number,
+  end: number,
+  className: string,
+  attrs = '',
+): string {
+  if (start >= end) return renderInline(src);
+  const tokens = tokenizeInline(src);
+  let offset = 0;
+  let html = '';
+  let open = false;
+
+  for (const token of tokens) {
+    const tokStart = offset;
+    const tokEnd = offset + token.text.length;
+    offset = tokEnd;
+    const overlaps = tokStart < end && tokEnd > start;
+    if (overlaps && !open) {
+      html += `<span class="${className}"${attrs}>`;
+      open = true;
+    }
+    html += token.html;
+    if (!overlaps && open) {
+      html += '</span>';
+      open = false;
+    }
+  }
+  if (open) html += '</span>';
+  return html;
 }
 
 export interface InlineSegment {

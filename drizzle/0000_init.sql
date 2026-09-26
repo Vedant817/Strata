@@ -17,7 +17,9 @@ CREATE TABLE `annotations` (
 	`body` text NOT NULL,
 	`kind` text DEFAULT 'comment' NOT NULL,
 	`parent_id` text,
-	`author_id` text NOT NULL,
+	`author_id` text,
+	`anon_id` text,
+	`guest_name` text,
 	`status` text DEFAULT 'visible' NOT NULL,
 	`is_accepted` integer DEFAULT false NOT NULL,
 	`is_resolved` integer DEFAULT false NOT NULL,
@@ -26,13 +28,14 @@ CREATE TABLE `annotations` (
 	`edited_at` integer,
 	FOREIGN KEY (`post_id`) REFERENCES `posts`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`version_id`) REFERENCES `post_versions`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`author_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`author_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
 CREATE INDEX `annotations_post_idx` ON `annotations` (`post_id`,`status`);--> statement-breakpoint
 CREATE INDEX `annotations_block_idx` ON `annotations` (`post_id`,`block_id`);--> statement-breakpoint
 CREATE INDEX `annotations_version_idx` ON `annotations` (`version_id`);--> statement-breakpoint
 CREATE INDEX `annotations_parent_idx` ON `annotations` (`parent_id`);--> statement-breakpoint
+CREATE INDEX `annotations_anon_idx` ON `annotations` (`anon_id`);--> statement-breakpoint
 CREATE TABLE `asks` (
 	`id` text PRIMARY KEY NOT NULL,
 	`post_id` text NOT NULL,
@@ -81,6 +84,19 @@ CREATE TABLE `capture_items` (
 );
 --> statement-breakpoint
 CREATE INDEX `capture_items_author_idx` ON `capture_items` (`author_id`,`state`);--> statement-breakpoint
+CREATE TABLE `handle_claims` (
+	`id` text PRIMARY KEY NOT NULL,
+	`handle` text NOT NULL,
+	`email` text NOT NULL,
+	`anon_id` text NOT NULL,
+	`token` text NOT NULL,
+	`expires_at` integer NOT NULL,
+	`redeemed_at` integer,
+	`created_at` integer DEFAULT (unixepoch() * 1000) NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `handle_claims_token_uq` ON `handle_claims` (`token`);--> statement-breakpoint
+CREATE INDEX `handle_claims_anon_idx` ON `handle_claims` (`anon_id`);--> statement-breakpoint
 CREATE TABLE `highlights` (
 	`id` text PRIMARY KEY NOT NULL,
 	`post_id` text NOT NULL,

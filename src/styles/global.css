@@ -278,6 +278,21 @@
   margin-inline: auto;
 }
 
+/* The article column. At narrow widths it is exactly the reading measure; from
+   1200px it widens by the width of a margin rail, so notes have somewhere to
+   live. The prose column inside stays pinned to `--measure` — only the
+   container grows, so line length is never sacrificed to the margin. */
+@utility article-body {
+  max-width: var(--measure);
+  margin-inline: auto;
+}
+
+@media (min-width: 1200px) {
+  .article-body {
+    max-width: calc(var(--measure) + 22rem);
+  }
+}
+
 /* Metadata label: small caps, tracked out. The one place caps are allowed. */
 @utility meta {
   font-family: var(--font-mono);
@@ -378,8 +393,40 @@
 }
 
 /* ---------------------------------------------------------------------------
-   8. Marginalia — sentence anchoring, marginal rail, note types
+   8. Marginalia — a true margin rail aligned to the annotated paragraph.
+   Server-rendered, so it exists without JS and is crawlable. CSS moves the
+   notes beside their block at wide widths; below that they sit directly under
+   it, which is the only place they can go on a phone.
    ------------------------------------------------------------------------ */
+.block-with-notes {
+  position: relative;
+}
+
+.block-notes {
+  margin-top: 1rem;
+}
+
+@media (min-width: 1200px) {
+  .block-with-notes {
+    display: grid;
+    grid-template-columns: var(--measure) 19rem;
+    column-gap: 3rem;
+    align-items: start;
+  }
+  .block-notes {
+    margin-top: 0;
+    position: sticky;
+    top: 6rem;
+    max-height: calc(100vh - 8rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* A hairline, not a card. */
+    border-left: 1px solid var(--rule);
+    padding-left: 1rem;
+  }
+  .block-notes:empty { display: none; }
+}
+
 .hl-anchor {
   background: var(--accent-soft);
   border-bottom: 1px solid var(--rule-strong);
@@ -407,6 +454,30 @@
 .note-author {
   border-inline-start: 2px solid var(--accent);
 }
+
+/* The floating affordance that appears next to a selection.
+   `fixed`, not `absolute`: the island is positioned with viewport coordinates
+   measured from the selection rect, and `absolute` would resolve them against
+   the document instead, putting the button thousands of pixels away. */
+.affordance {
+  position: fixed;
+  z-index: 30;
+  transform: translate(-50%, -100%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.affordance:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ---------------------------------------------------------------------------
    9. Print — a reading product must print well
