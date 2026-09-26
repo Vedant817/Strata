@@ -1,0 +1,283 @@
+---
+import Base from '../../layouts/Base.astro';
+import Prose from '../../components/Prose.astro';
+import StatusBadge from '../../components/StatusBadge.astro';
+import DepthDial from '../../components/islands/DepthDial';
+import {
+  getAdjacent,
+  getLastReceipt,
+  getPostBySlug,
+  getRevisionView,
+  getVersions,
+  incrementViews,
+  recordRead,
+} from '../../lib/repo/posts';
+import { resolvePrefs, ANON_COOKIE, type Depth } from '../../lib/prefs';
+import { minutesAtDepth } from '../../lib/blocks';
+import { diffStats } from '../../lib/diff';
+import { ago, longDate, shortAgo, plural } from '../../lib/format';
+import { stripInline } from '../../lib/inline';
+
+const { slug } = Astro.params;
+const post = slug ? await getPostBySlug(slug) : null;
+if (!post) return new Response(null, { status: 404, statusText: 'Not found' });
+
+// Reading state. The page renders at the depth the reader chose, server-side —
+// the dial is an enhancement over a complete document, not the source of it.
+const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+const prefs = resolvePrefs(Astro.cookies as never, anonId);
+const depth: Depth = prefs.depth;
+
+/** Revision view. `?rev=N` renders any historical version in place. A revision
+ *  that does not exist is a bad link, not a crash — answer 404 honestly so it
+ *  shows up in logs instead of silently rendering the current version. */
+const requestedRev = Number(Astro.url.searchParams.get('rev') ?? '');
+const isViewingOld = Number.isFinite(requestedRev) && requestedRev > 0;
+const view = await getRevisionView(post.id, isViewingOld ? requestedRev : undefined);
+if (!view) return new Response(null, { status: 404, statusText: 'Not found' });
+
+const doc = post.blocks;
+const hasUnderstand = doc.some((b) => b.layer === 'understand');
+const hasMaster = doc.some((b) => b.layer === 'master');
+const minutes = {
+  skim: minutesAtDepth(doc, 'skim'),
+  understand: minutesAtDepth(doc, 'understand'),
+  master: minutesAtDepth(doc, 'master'),
+};
+
+// Telemetry must never block or fail the response.
+void (async () => {
+  try {
+    await recordRead({ postId: post.id, versionId: post.version.id, anonId });
+    await incrementViews(post.id);
+  } catch (err) {
+    console.error('[strata] read receipt failed', err);
+  }
+})();
+
+const versions = await getVersions(post.id);
+const lastSeen = await getLastReceipt(anonId, post.id);
+const hasChangesSince = Boolean(
+  lastSeen && lastSeen.versionId !== view.current.id && lastSeen.versionNumber < view.current.versionNumber,
+);
+
+const stats = diffStats(view.diff);
+const reviewed = post.lastReviewedAt ? shortAgo(post.lastReviewedAt) : null;
+const { newer, older } = await getAdjacent(post.id);
+
+const title = isViewingOld ? `${post.title} (revision ${view.current.versionNumber})` : post.title;
+const description = post.seoDescription || stripInline(post.dek);
+
+const diffByBlock = Object.fromEntries(view.diff.map((d) => [d.blockId, d.segments]));
+const changeByBlock = Object.fromEntries(view.diff.map((d) => [d.blockId, d.status]));
+
+const jsonLd = [
+  {
+    '@type': 'Article',
+    headline: post.title,
+    description,
+    datePublished: new Date(post.publishedAt ?? post.createdAt).toISOString(),
+    dateModified: new Date(view.current.createdAt).toISOString(),
+    author: { '@type': 'Person', name: post.authorName },
+    isAccessibleForFree: true,
+    version: view.current.versionNumber,
+    ...(post.topicName ? { articleSection: post.topicName } : {}),
+  },
+  { '@type': 'Person', name: post.authorName, url: `/a/${post.authorHandle}` },
+];
+---
+
+<Base title={title} description={description} ogType="article" prefs={prefs} jsonLd={jsonLd}>
+  <article data-depth-host data-depth={depth} data-post-id={post.id} data-version={view.current.versionNumber}>
+    <header class="shell border-b border-rule pt-10 pb-8">
+      <div class="measure">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <StatusBadge status={post.status} />
+          {post.topicName && <a href="/topics" class="meta no-underline hover:text-ink">{post.topicName}</a>}
+          <span class="meta">{longDate(post.publishedAt)}</span>
+          {
+            view.current.versionNumber > 1 && (
+              <span class="meta">
+                revised {view.current.versionNumber}× · {shortAgo(view.current.createdAt)}
+              </span>
+            )
+          }
+        </div>
+
+        <h1 class="mt-5 text-3xl">{post.title}</h1>
+        {post.dek && <p class="mt-4 text-[1.125rem] leading-relaxed text-ink-2">{post.dek}</p>}
+
+        <p class="mt-5 text-[0.9375rem] text-ink-3">
+          <a href={`/a/${post.authorHandle}`} class="text-ink-2 no-underline hover:text-accent">{post.authorName}</a>
+          {
+            post.annotationTotal > 0 && (
+              <>
+                {' · '}
+                <a href="#marginalia" class="text-ink-2 no-underline hover:text-accent">
+                  {plural(post.annotationTotal, 'note')} in the margin
+                </a>
+              </>
+            )
+          }
+          {reviewed && <span> · reviewed {reviewed}</span>}
+        </p>
+      </div>
+    </header>
+
+    <div class="shell">
+      <div class="measure mt-6 space-y-3">
+        {
+          hasChangesSince && !isViewingOld && (
+            <div class="border border-accent bg-accent-soft px-4 py-3">
+              <p class="text-[0.9375rem]">
+                <strong class="font-medium">This post has changed since you read it.</strong>{' '}
+                <span class="text-ink-2">
+                  You last saw version {lastSeen!.versionNumber}. {plural(stats.changed, 'change')} since.
+                </span>
+              </p>
+              <a
+                href={`?rev=${view.current.versionNumber}`}
+                class="meta mt-2 inline-block text-accent no-underline hover:underline"
+              >
+                See what changed →
+              </a>
+            </div>
+          )
+        }
+
+        {
+          isViewingOld && (
+            <div class="border border-ochre px-4 py-3">
+              <p class="text-[0.9375rem]">
+                <strong class="font-medium">Viewing revision {view.current.versionNumber}</strong>{' '}
+                <span class="text-ink-2">
+                  — {view.compared
+                    ? `changes shown against revision ${view.compared.versionNumber}`
+                    : 'the first published version'}
+                  . Written {ago(view.current.createdAt)}.
+                </span>
+              </p>
+              <p class="meta mt-2">{view.current.changeSummary}</p>
+              <a href={`/w/${post.slug}`} class="meta mt-2 inline-block text-ochre no-underline hover:underline">
+                ← Back to the current version
+              </a>
+            </div>
+          )
+        }
+      </div>
+    </div>
+
+    <div class="shell mt-8">
+      <div class="measure">
+        <Prose
+          blocks={doc}
+          diffSegments={isViewingOld && view.compared ? diffByBlock : undefined}
+          changeStatus={isViewingOld && view.compared ? changeByBlock : undefined}
+        />
+      </div>
+    </div>
+
+    <div class="shell mt-16">
+      <div class="measure space-y-10">
+        <section aria-labelledby="depth-heading" class="border-t border-rule pt-6">
+          <h2 id="depth-heading" class="meta mb-3">How deep do you want this?</h2>
+          <DepthDial
+            client:idle
+            initial={depth}
+            minutes={minutes}
+            hasUnderstand={hasUnderstand}
+            hasMaster={hasMaster}
+          />
+        </section>
+
+        <section aria-labelledby="revisions-heading" class="border-t border-rule pt-6">
+          <div class="flex items-baseline justify-between gap-4">
+            <h2 id="revisions-heading" class="meta">Revision history</h2>
+            {
+              isViewingOld && (
+                <a href={`/w/${post.slug}`} class="meta text-accent no-underline hover:underline">
+                  current →
+                </a>
+              )
+            }
+          </div>
+
+          {
+            isViewingOld && view.compared && stats.changed > 0 && (
+              <p class="mt-2 text-[0.9375rem] text-ink-2">
+                {[
+                  stats.modified > 0 && `${plural(stats.modified, 'paragraph')} rewritten`,
+                  stats.added > 0 && `${stats.added} added`,
+                  stats.removed > 0 && `${stats.removed} removed`,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+            )
+          }
+
+          <ol class="mt-4 space-y-3">
+            {
+              versions.map((v) => {
+                const isViewing = v.id === view.current.id;
+                const isHead = v.id === post.currentVersionId;
+                return (
+                  <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-rule pb-3 last:border-b-0">
+                    <span class="meta w-8 tabular-nums">v{v.versionNumber}</span>
+                    <a
+                      href={`?rev=${v.versionNumber}`}
+                      class:list={[
+                        'text-[0.9375rem] no-underline',
+                        isViewing ? 'text-ink' : 'text-ink-2 hover:text-accent',
+                      ]}
+                      aria-current={isViewing ? 'true' : undefined}
+                    >
+                      {v.changeSummary}
+                    </a>
+                    <span class="meta">{shortAgo(v.createdAt)}</span>
+                    {v.isMajor && !isHead && <span class="meta text-ochre">major</span>}
+                    {isHead && <span class="meta text-pine">current</span>}
+                    {isViewing && !isHead && <span class="meta text-accent">viewing</span>}
+                  </li>
+                );
+              })
+            }
+          </ol>
+        </section>
+
+        <section id="marginalia" aria-labelledby="marginalia-heading" class="border-t border-rule pt-6">
+          <h2 id="marginalia-heading" class="meta">Marginalia</h2>
+          <p class="mt-2 text-[0.9375rem] text-ink-2">
+            {
+              post.annotationTotal > 0
+                ? `${plural(post.annotationTotal, 'note')} attached to specific sentences in this post.`
+                : 'No notes yet.'
+            }{' '}
+            Select any sentence in the text to add your own.
+          </p>
+        </section>
+      </div>
+    </div>
+
+    {
+      (newer || older) && (
+        <nav aria-label="Adjacent writing" class="shell border-t border-rule py-8">
+          <div class="grid gap-6 sm:grid-cols-2">
+            {older && (
+              <a href={`/w/${older.slug}`} class="group block no-underline">
+                <p class="meta">← Previous</p>
+                <p class="mt-1 text-[1.0625rem] text-ink group-hover:text-accent">{older.title}</p>
+              </a>
+            )}
+            {newer && (
+              <a href={`/w/${newer.slug}`} class="group block no-underline sm:text-right">
+                <p class="meta">Next →</p>
+                <p class="mt-1 text-[1.0625rem] text-ink group-hover:text-accent">{newer.title}</p>
+              </a>
+            )}
+          </div>
+        </nav>
+      )
+    }
+  </article>
+</Base>

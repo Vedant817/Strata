@@ -7,8 +7,8 @@
  * diff so the reader sees the actual edit, not a whole-block replacement.
  */
 
-import { diffWordsWithSpace } from 'diff';
-import { blockToPlainText, type Block } from './blocks';
+import { blockInlineSource, type Block } from './blocks';
+import { diffInline, type InlineSegment } from './inline-diff';
 
 export type DiffStatus = 'unchanged' | 'added' | 'removed' | 'modified';
 export type SegmentType = 'same' | 'ins' | 'del';
@@ -16,6 +16,8 @@ export type SegmentType = 'same' | 'ins' | 'del';
 export interface Segment {
   type: SegmentType;
   text: string;
+  /** Pre-rendered HTML. Absent for plain-text consumers (search, the API). */
+  html?: string;
 }
 
 export interface DiffEntry {
@@ -42,14 +44,14 @@ export function diffBlocks(before: Block[], after: Block[]): DiffEntry[] {
         blockId: next.id,
         status: 'added',
         before: '',
-        after: blockToPlainText(next),
-        segments: [{ type: 'ins', text: blockToPlainText(next) }],
+        after: blockInlineSource(next),
+        segments: [{ type: 'ins', text: blockInlineSource(next) }],
         meaningful: true,
       });
       continue;
     }
-    const a = blockToPlainText(prev);
-    const b = blockToPlainText(next);
+    const a = blockInlineSource(prev);
+    const b = blockInlineSource(next);
     if (a === b) {
       out.push({
         blockId: next.id,
@@ -75,7 +77,7 @@ export function diffBlocks(before: Block[], after: Block[]): DiffEntry[] {
   // older revision is preserved for the reader comparing versions.
   for (const prev of before) {
     if (seen.has(prev.id)) continue;
-    const text = blockToPlainText(prev);
+    const text = blockInlineSource(prev);
     out.push({
       blockId: prev.id,
       status: 'removed',
@@ -90,14 +92,11 @@ export function diffBlocks(before: Block[], after: Block[]): DiffEntry[] {
 }
 
 export function wordDiff(a: string, b: string): Segment[] {
-  const parts = diffWordsWithSpace(a, b);
-  return parts
-    .map((part) => ({
-      type: (part.added ? 'ins' : part.removed ? 'del' : 'same') as SegmentType,
-      text: part.value,
-    }))
-    .filter((s) => s.text.length > 0);
+  const parts = diffInline(a, b);
+  return parts.map((p) => ({ type: p.type, text: p.text, html: p.html }));
 }
+
+export type { InlineSegment };
 
 export interface DiffStats {
   added: number;

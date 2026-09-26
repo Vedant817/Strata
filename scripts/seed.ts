@@ -250,6 +250,22 @@ async function main() {
   }
 
   console.log('\nseeded ✓');
+
+  // Invariants. A post with no `understand` or `master` layer renders a
+  // depth dial that does nothing, which quietly makes the core reading feature
+  // look broken on exactly the posts a new reader lands on.
+  const thin: string[] = [];
+  for (const seed of SEED_POSTS) {
+    const final = seed.revisions[seed.revisions.length - 1]!.body;
+    const layers = new Set(final.map((b) => b.layer));
+    if (!layers.has('understand')) thin.push(`${seed.slug} — no understand layer`);
+    if (!layers.has('master')) thin.push(`${seed.slug} — no master layer`);
+  }
+  if (thin.length) {
+    console.warn('\nwarning: posts without a full depth stack:');
+    for (const t of thin) console.warn(`  · ${t}`);
+  }
+
   process.exit(0);
 }
 

@@ -1,0 +1,189 @@
+---
+/**
+ * Renders a typed block document to HTML.
+ *
+ * Every block carries `data-block-id` (stable across revisions — this is what
+ * annotations and telemetry attach to) and `data-layer`, which the depth dial
+ * uses to collapse content. The whole document renders server-side; the depth
+ * dial is a progressive enhancement over a complete, readable page.
+ */
+import type { Block } from '../lib/blocks';
+import { blockInlineSource } from '../lib/blocks';
+import { renderInline, slugify } from '../lib/inline';
+import Artifact from './islands/Artifact';
+
+interface Props {
+  blocks: Block[];
+  /** Diff segments keyed by block id, when rendering a revision comparison. */
+  diffSegments?: Record<string, Array<{ type: 'same' | 'ins' | 'del'; text: string }>>;
+  changeStatus?: Record<string, 'added' | 'removed' | 'modified' | 'unchanged'>;
+}
+
+const { blocks, diffSegments, changeStatus } = Astro.props;
+
+/** Diff segments arrive pre-rendered from the inline-aware tokeniser, so a code
+ *  span inside an edited paragraph stays a code span. */
+const segHtml = (segments: Array<{ type: string; html?: string; text: string }>): string =>
+  segments
+    .map((s) => {
+      const html = s.html ?? renderInline(s.text);
+      if (s.type === 'ins') return `<span class="diff-ins">${html}</span>`;
+      if (s.type === 'del') return `<span class="diff-del">${html}</span>`;
+      return html;
+    })
+    .join('');
+---
+
+<div class="prose-post">
+  {
+    blocks.map((block) => {
+      const id = block.id;
+      const status = changeStatus?.[id];
+      const segments = diffSegments?.[id];
+      const changed = status && status !== 'unchanged';
+      const body = () =>
+        segments ? segHtml(segments) : renderInline(blockInlineSource(block));
+
+      return (
+        <div
+          data-block-id={id}
+          data-layer={block.layer}
+          data-block-type={block.type}
+          data-change={status}
+          class:list={[changed && 'diff-block', status === 'removed' && 'opacity-70']}
+        >
+          {block.type === 'tldr' && (
+            <aside class="border-l-2 border-accent pl-5">
+              <p class="meta mb-2">In one paragraph</p>
+              <p class="!text-[1.125rem] leading-relaxed" set:html={body()} />
+            </aside>
+          )}
+
+          {block.type === 'heading' && block.level === 2 && (
+            <h2 id={slugify(block.text)} class="scroll-mt-24">
+              <a href={`#${slugify(block.text)}`} class="no-underline hover:text-accent" set:html={body()} />
+            </h2>
+          )}
+
+          {block.type === 'heading' && block.level === 3 && (
+            <h3 id={slugify(block.text)} class="scroll-mt-24">
+              <a href={`#${slugify(block.text)}`} class="no-underline hover:text-accent" set:html={body()} />
+            </h3>
+          )}
+
+          {block.type === 'paragraph' && <p set:html={body()} />}
+
+          {block.type === 'quote' && (
+            <figure>
+              <blockquote class="!m-0">
+                <p set:html={body()} />
+                {block.attribution && (
+                  <figcaption class="meta mt-2 not-italic">— {block.attribution}</figcaption>
+                )}
+              </blockquote>
+            </figure>
+          )}
+
+          {block.type === 'callout' && (
+            <aside
+              class:list={[
+                'border p-4 text-[0.9375rem]',
+                block.tone === 'correction' && 'border-accent bg-accent-soft',
+                block.tone === 'warn' && 'border-ochre',
+                block.tone === 'note' && 'border-rule bg-sunken',
+              ]}
+            >
+              {block.title && (
+                <p
+                  class:list={[
+                    'meta mb-1',
+                    block.tone === 'correction' && 'text-accent',
+                    block.tone === 'warn' && 'text-ochre',
+                  ]}
+                >
+                  {block.title}
+                </p>
+              )}
+              <p class="!m-0 leading-relaxed" set:html={body()} />
+            </aside>
+          )}
+
+          {block.type === 'primer' && (
+            <aside class="border border-dashed border-rule-strong bg-sunken p-4">
+              <p class="meta mb-1">
+                <span class="text-ink">{block.term}</span> — context
+              </p>
+              <p class="!m-0 text-[0.9375rem] leading-relaxed text-ink-2" set:html={body()} />
+            </aside>
+          )}
+
+          {block.type === 'code' && (
+            <figure>
+              <pre data-lang={block.lang}><code>{block.code}</code></pre>
+              {block.caption && <figcaption class="meta mt-2">{block.caption}</figcaption>}
+            </figure>
+          )}
+
+          {block.type === 'list' &&
+            (block.ordered ? (
+              <ol class="list-decimal pl-6 space-y-2">
+                {block.items.map((item) => (
+                  <li set:html={renderInline(item)} />
+                ))}
+              </ol>
+            ) : (
+              <ul class="list-none pl-0 space-y-2">
+                {block.items.map((item) => (
+                  <li class="flex gap-3">
+                    <span aria-hidden="true" class="text-ink-3 select-none">
+                      —
+                    </span>
+                    <span set:html={renderInline(item)} />
+                  </li>
+                ))}
+              </ul>
+            ))}
+
+          {block.type === 'table' && (
+            <div class="overflow-x-auto">
+              <table class="w-full border-collapse text-[0.9375rem]">
+                <thead>
+                  <tr>
+                    {block.head.map((h) => (
+                      <th class="border-b border-rule-strong px-3 py-2 text-left font-medium" set:html={renderInline(h)} />
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.rows.map((row) => (
+                    <tr>
+                      {row.map((cell) => (
+                        <td class="border-b border-rule px-3 py-2 align-top text-ink-2" set:html={renderInline(cell)} />
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {block.type === 'figure' && (
+            <figure>
+              <img src={block.src} alt={block.alt} loading="lazy" decoding="async" />
+              {block.caption && <figcaption class="meta mt-2">{block.caption}</figcaption>}
+            </figure>
+          )}
+
+          {block.type === 'interactive' && (
+            <Artifact
+              client:visible
+              component={block.component}
+              title={block.title}
+              props={block.props}
+            />
+          )}
+        </div>
+      );
+    })
+  }
+</div>

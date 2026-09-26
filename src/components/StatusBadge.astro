@@ -1,0 +1,54 @@
+---
+import type { PostStatus } from '../lib/db/schema';
+import { relativeTime } from '../lib/format';
+
+interface Props {
+  status: PostStatus;
+  updatedAt?: number;
+  compact?: boolean;
+}
+
+const META: Record<PostStatus, { label: string; colour: string; meaning: string }> = {
+  seedling: {
+    label: 'Seedling',
+    colour: 'var(--moss)',
+    meaning: 'An early, evolving thought. Published before it is finished.',
+  },
+  budding: {
+    label: 'Budding',
+    colour: 'var(--ochre)',
+    meaning: 'An argument forming, with references attached to its claims.',
+  },
+  evergreen: {
+    label: 'Evergreen',
+    colour: 'var(--pine)',
+    meaning: 'Actively maintained. Someone is answerable for its accuracy.',
+  },
+  archived: {
+    label: 'Archived',
+    colour: 'var(--ink-3)',
+    meaning: 'Kept for the record, no longer maintained.',
+  },
+};
+
+const { status, updatedAt, compact = false } = Astro.props;
+const meta = META[status];
+---
+
+<span
+  class="meta inline-flex items-center gap-1.5 whitespace-nowrap"
+  title={meta.meaning}
+  style={compact ? undefined : `color: ${meta.colour}`}
+>
+  <span
+    class="inline-block h-1.5 w-1.5 shrink-0"
+    style={`background: ${meta.colour}`}
+    aria-hidden="true"
+  ></span>
+  {meta.label}
+  {
+    !compact && updatedAt && (
+      <span class="text-ink-3">· {relativeTime(updatedAt)}</span>
+    )
+  }
+</span>

@@ -91,21 +91,27 @@ for (const dir of SCAN_DIRS) {
   }
 }
 
-// Structural checks: a component that renders data must handle all three states.
+// Structural checks: a component that *fetches* must handle all three states.
+// Components that take their data entirely through props have no loading phase
+// and demanding one would push authors to write dead markup.
 const REQUIRED_STATES = ['empty', 'loading', 'error'];
+const FETCHES = /\bfetch\s*\(|XMLHttpRequest|\bawait\s+[a-z]/i;
+
 const islands = [];
 for (const file of walk(join(ROOT, 'src'))) {
   if (extname(file) === '.tsx' && !file.includes('lint-design')) islands.push(file);
 }
 for (const file of islands) {
   const text = readFileSync(file, 'utf8');
+  if (!FETCHES.test(text)) continue;
+  if (text.includes('design-allow')) continue;
   const missing = REQUIRED_STATES.filter((s) => !new RegExp(`\\b${s}\\b`, 'i').test(text));
-  if (missing.length && !text.includes('design-allow')) {
+  if (missing.length) {
     violations.push({
       file: relative(ROOT, file).replace(/\\/g, '/'),
       line: 1,
-      rule: `island missing states: ${missing.join(', ')}`,
-      snippet: 'data-driven component must handle empty, loading and error',
+      rule: `data-fetching component missing states: ${missing.join(', ')}`,
+      snippet: 'a component that fetches must handle empty, loading and error',
     });
   }
 }

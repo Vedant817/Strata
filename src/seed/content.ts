@@ -180,7 +180,7 @@ const cacheV2 = applyPatches(cacheV1, [
     block: interactive(
       'curve',
       'Staleness against TTL, for a key changing every 10s',
-      { min: 0.5, max: 300, step: 0.5, changeEvery: 10, unit: 's' },
+      { model: 'staleness', min: 0.5, max: 300, step: 0.5, changeEvery: 10, unit: 's' },
     ),
   },
   {
@@ -244,7 +244,7 @@ const p99V1 = doc(
     'A construction that forces two random variables to share all of their randomness, which gives the largest possible correlation. Perfectly correlated tails are what make naive percentile addition accidentally correct — and they do not happen in your infrastructure.',
   ),
   p(
-    'In the best case the slow tails line up and the sum is roughly right. In the worst case they are disjoint and the true p99 of the pair is close to the *max*, not the sum. In between, which is where you actually live, it is somewhere you cannot compute from the two numbers you have.',
+    'The inequality is the interesting part. `p99(A + B) ≤ p99(A) + p99(B)` holds always, so summing can only ever *overstate* — the direction is not in doubt. What is in doubt is the size of the error, and that depends entirely on how correlated the tails are. If your hops fail together, the sum is exactly right. If they fail independently, a real fraction of the budget you just committed to is imaginary. Nothing in either dashboard tells you which world you are in.',
   ),
   callout(
     'warn',
@@ -264,12 +264,15 @@ const p99V1 = doc(
   p(
     'The uncomfortable part: this requires trace propagation to be correct, which is a larger project than the SLO was. That is the real cost of a meaningful latency budget, and it is the cost people avoid by averaging.',
   ),
+  note(
+    'A caveat on the 4% figure, which readers have correctly pushed back on twice. It assumes the slow tails of the four hops are independent. Under a shared cause — a noisy neighbour, a deploy that touched every service, a GC pause — the tails are highly correlated and naive addition is closer to right. That is precisely why the mistake survives: it is right often enough to feel validated, and the incidents where it is badly wrong are the ones you do not get a page for.',
+  ),
 );
 
 const p99V2 = applyPatches(p99V1, [
   {
     op: 'insertAfter',
-    after: blockId(p99V1, { type: 'paragraph', contains: 'somewhere you cannot compute' }),
+    after: blockId(p99V1, { type: 'paragraph', contains: 'The inequality is the interesting part' }),
     block: interactive(
       'breakdown',
       'Where the p99 actually goes across four hops',
@@ -319,6 +322,13 @@ const stagingV1 = doc(
     'note',
     'Why this is a seedling',
     'I am publishing this before I have an answer because the failure mode of waiting is that I will rationalise the decision and then write a retrospective about how it went well. I would rather the record show genuine uncertainty.',
+  ),
+  primer(
+    'Shadow traffic',
+    'Mirrored production requests onto a non-serving copy of the stack. Reads see real data, writes are intercepted and discarded, so the code path under test is byte-for-byte the one in production without the side effects.',
+  ),
+  note(
+    'The number I keep avoiding putting here: the nine-hour wait cost us roughly one business day of engineering time and one customer-visible gap. Against 400 engineer-hours a year for staging, that is not obviously a bad trade — but it is a single incident, and single incidents are exactly the sample size I should not be drawing conclusions from.',
   ),
 );
 
@@ -437,7 +447,7 @@ const embedV1 = doc(
   interactive(
     'curve',
     'Recall against embedding width, measured on our corpus',
-    { min: 128, max: 3072, step: 128, measured: [0.71, 0.79, 0.83, 0.85, 0.86, 0.861, 0.859, 0.857] },
+    { model: 'recall', min: 128, max: 3072, step: 128, measured: [0.71, 0.79, 0.83, 0.85, 0.86, 0.861, 0.859, 0.857] },
   ),
   p(
     'The curve flattens hard around 768. Everything past that is index size and query latency for a fraction of a point of recall, and that fraction is inside the noise of a 300-query eval set.',
@@ -450,6 +460,13 @@ const embedV1 = doc(
   ]),
   p(
     'Notice that none of those are about the model. The first three are about your pipeline being honest about what it is embedding.',
+  ),
+  primer(
+    'ANN index',
+    'An approximate nearest-neighbour index. It trades exact recall for sublinear search by partitioning the vector space and probing only a few partitions, so the answer depends heavily on the distribution of what you put in it — a corpus of near-duplicates is the worst case.',
+  ),
+  note(
+    'The measurement was run twice: once on support tickets, once on internal queries. The curve shape held on both, but the absolute values were about four points higher on internal queries, because internal query phrasing is more regular. If you are picking a corpus for your own eval set, that gap is worth knowing about.',
   ),
 );
 

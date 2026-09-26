@@ -182,6 +182,37 @@ export function blockToPlainText(block: Block): string {
   }
 }
 
+/**
+ * The exact string `renderInline` consumes for a block — i.e. what the reader
+ * actually sees, excluding any chrome the renderer adds separately (a callout's
+ * title, a code caption, a figure's alt text).
+ *
+ * `blockToPlainText` is the *search/retrieval/anchor* projection and includes
+ * those fields. Diffing and display must use this one, or a callout's title
+ * shows up twice and code spans render as literal backticks.
+ */
+export function blockInlineSource(block: Block): string {
+  switch (block.type) {
+    case 'paragraph':
+    case 'heading':
+    case 'tldr':
+    case 'callout':
+    case 'quote':
+    case 'primer':
+      return block.text;
+    case 'code':
+      return block.code;
+    case 'list':
+      return block.items.join('\n');
+    case 'table':
+      return [block.head.join(' '), ...block.rows.map((r) => r.join(' '))].join('\n');
+    case 'figure':
+      return [block.alt, block.caption].filter(Boolean).join(' ');
+    case 'interactive':
+      return [block.title, JSON.stringify(block.props)].filter(Boolean).join(' ');
+  }
+}
+
 export function countWords(text: string): number {
   const trimmed = text.trim();
   if (!trimmed) return 0;

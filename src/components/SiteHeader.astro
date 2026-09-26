@@ -12,43 +12,19 @@ const links = [
 const isActive = (href: string) => path === href || path.startsWith(href + '/');
 ---
 
-<header
-  data-chrome="true"
-  class="border-b border-rule bg-paper sticky top-0 z-40"
->
-  <div class="shell flex items-baseline justify-between gap-6 py-4">
-    <a href="/" class="group flex items-baseline gap-2 no-underline">
-      <span class="font-serif text-[1.375rem] leading-none font-medium tracking-tight text-ink">
-        Strata
-      </span>
-      <span
-        class="meta hidden sm:inline group-hover:text-ink-2 transition-colors"
-        aria-hidden="true">a publication about things that change</span>
-    </a>
+<header data-chrome="true" class="border-b border-rule bg-paper z-40 md:sticky md:top-0">
+  <div class="shell">
+    <div class="flex items-center justify-between gap-3 py-3 sm:py-4">
+      <a href="/" class="group flex items-baseline gap-2 no-underline min-w-0">
+        <span class="font-serif text-[1.375rem] leading-none font-medium tracking-tight text-ink">
+          Strata
+        </span>
+        <span class="meta hidden lg:inline truncate group-hover:text-ink-2 transition-colors" aria-hidden="true">
+          a publication about things that change
+        </span>
+      </a>
 
-    <div class="flex items-center gap-5">
-      <nav aria-label="Primary">
-        <ul class="flex items-center gap-4 sm:gap-6">
-          {
-            links.map((l) => (
-              <li>
-                <a
-                  href={l.href}
-                  class:list={[
-                    'meta no-underline transition-colors hover:text-ink',
-                    isActive(l.href) ? 'text-ink' : 'text-ink-3',
-                  ]}
-                  aria-current={isActive(l.href) ? 'page' : undefined}
-                >
-                  {l.label}
-                </a>
-              </li>
-            ))
-          }
-        </ul>
-      </nav>
-
-      <div class="flex items-center gap-1 border-l border-rule pl-3">
+      <div class="flex items-center gap-1 shrink-0 border-l border-rule pl-3">
         <button
           type="button"
           data-theme-toggle
@@ -66,7 +42,8 @@ const isActive = (href: string) => path === href || path.startsWith(href + '/');
             aria-hidden="true"
           >
             <circle cx="8" cy="8" r="3.4"></circle>
-            <path d="M8 1v1.6M8 13.4V15M15 8h-1.6M2.6 8H1M12.9 3.1l-1.1 1.1M4.2 11.8l-1.1 1.1M12.9 12.9l-1.1-1.1M4.2 4.2L3.1 3.1"
+            <path
+              d="M8 1v1.6M8 13.4V15M15 8h-1.6M2.6 8H1M12.9 3.1l-1.1 1.1M4.2 11.8l-1.1 1.1M12.9 12.9l-1.1-1.1M4.2 4.2L3.1 3.1"
               stroke-linecap="round"></path>
           </svg>
         </button>
@@ -82,6 +59,33 @@ const isActive = (href: string) => path === href || path.startsWith(href + '/');
         </button>
       </div>
     </div>
+
+    {/* The nav gets its own row and its own scroll on narrow viewports rather
+        than a hamburger. A disclosure menu would hide the publication's whole
+        shape behind a modal, and every item here is one tap from the footer
+        anyway. */}
+    <nav aria-label="Primary" class="-mx-5 overflow-x-auto md:mx-0 md:overflow-visible">
+      <ul
+        class="flex items-center gap-5 border-t border-rule px-5 py-2 whitespace-nowrap md:gap-6 md:border-t-0 md:px-0 md:py-0"
+      >
+        {
+          links.map((l) => (
+            <li>
+              <a
+                href={l.href}
+                class:list={[
+                  'meta inline-block py-1 no-underline transition-colors hover:text-ink',
+                  isActive(l.href) ? 'text-ink' : 'text-ink-3',
+                ]}
+                aria-current={isActive(l.href) ? 'page' : undefined}
+              >
+                {l.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
   </div>
 </header>
 
