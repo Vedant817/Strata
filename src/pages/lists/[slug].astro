@@ -1,0 +1,56 @@
+---
+import Base from '../../layouts/Base.astro';
+import PostRow from '../../components/PostRow.astro';
+import StatusBadge from '../../components/StatusBadge.astro';
+import { getReadingList } from '../../lib/repo/taxonomy';
+import { resolvePrefs, ANON_COOKIE } from '../../lib/prefs';
+
+const { slug } = Astro.params;
+const list = slug ? await getReadingList(slug) : null;
+if (!list) return new Response(null, { status: 404, statusText: 'Not found' });
+
+const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+const prefs = resolvePrefs(Astro.cookies as never, anonId);
+
+const total = list.items.reduce((sum, i) => sum + (i.post.readingMinutes ?? 0), 0);
+---
+
+<Base title={list.title} description={list.description} prefs={prefs}>
+  <header class="shell border-b border-rule py-12">
+    <div class="max-w-2xl">
+      <p class="meta">Reading list · {list.ownerHandle}</p>
+      <h1 class="mt-3 text-3xl">{list.title}</h1>
+      <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">{list.description}</p>
+      <p class="meta mt-4">
+        {list.items.length} posts · about {total} minutes end to end
+      </p>
+    </div>
+  </header>
+
+  <div class="shell py-12">
+    <ol class="max-w-3xl">
+      {
+        list.items.map((item, i) => (
+          <li>
+            <PostRow
+              slug={item.post.slug}
+              title={item.post.title}
+              dek={item.post.dek}
+              status={item.post.status}
+              publishedAt={item.post.publishedAt}
+              readingMinutes={item.post.readingMinutes}
+              authorName={item.post.authorName}
+              note={item.note}
+              ordinal={i + 1}
+            />
+          </li>
+        ))
+      }
+    </ol>
+
+    <p class="mt-12 max-w-2xl border-t border-rule pt-6 text-[0.9375rem] text-ink-2">
+      Reading lists are the primary unit of discovery here. Want to make one?{' '}
+      <a href="/write" class="text-ink no-underline hover:text-accent">Write here →</a>
+    </p>
+  </div>
+</Base>

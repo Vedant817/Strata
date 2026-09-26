@@ -14,7 +14,7 @@ const isActive = (href: string) => path === href || path.startsWith(href + '/');
 
 <header data-chrome="true" class="border-b border-rule bg-paper z-40 md:sticky md:top-0">
   <div class="shell">
-    <div class="flex items-center justify-between gap-3 py-3 sm:py-4">
+    <div class="flex flex-wrap items-center gap-x-6 py-3 md:py-4">
       <a href="/" class="group flex items-baseline gap-2 no-underline min-w-0">
         <span class="font-serif text-[1.375rem] leading-none font-medium tracking-tight text-ink">
           Strata
@@ -24,7 +24,34 @@ const isActive = (href: string) => path === href || path.startsWith(href + '/');
         </span>
       </a>
 
-      <div class="flex items-center gap-1 shrink-0 border-l border-rule pl-3">
+      {/* Inline from md up; its own scrollable row below that. No hamburger —
+          a disclosure menu would hide the publication's whole shape behind a
+          modal, and every item here is one tap away in the footer anyway. */}
+      <nav
+        aria-label="Primary"
+        class="order-3 -mx-5 mt-3 w-[calc(100%+2.5rem)] overflow-x-auto border-t border-rule px-5 pt-1 md:order-none md:mx-0 md:mt-0 md:w-auto md:flex-1 md:overflow-visible md:border-t-0 md:px-0 md:pt-0"
+      >
+        <ul class="flex items-center gap-5 whitespace-nowrap md:gap-6">
+          {
+            links.map((l) => (
+              <li>
+                <a
+                  href={l.href}
+                  class:list={[
+                    'meta inline-block py-1.5 no-underline transition-colors hover:text-ink',
+                    isActive(l.href) ? 'text-ink' : 'text-ink-3',
+                  ]}
+                  aria-current={isActive(l.href) ? 'page' : undefined}
+                >
+                  {l.label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </nav>
+
+      <div class="ml-auto flex shrink-0 items-center gap-1 border-l border-rule pl-3">
         <button
           type="button"
           data-theme-toggle
@@ -59,33 +86,6 @@ const isActive = (href: string) => path === href || path.startsWith(href + '/');
         </button>
       </div>
     </div>
-
-    {/* The nav gets its own row and its own scroll on narrow viewports rather
-        than a hamburger. A disclosure menu would hide the publication's whole
-        shape behind a modal, and every item here is one tap from the footer
-        anyway. */}
-    <nav aria-label="Primary" class="-mx-5 overflow-x-auto md:mx-0 md:overflow-visible">
-      <ul
-        class="flex items-center gap-5 border-t border-rule px-5 py-2 whitespace-nowrap md:gap-6 md:border-t-0 md:px-0 md:py-0"
-      >
-        {
-          links.map((l) => (
-            <li>
-              <a
-                href={l.href}
-                class:list={[
-                  'meta inline-block py-1 no-underline transition-colors hover:text-ink',
-                  isActive(l.href) ? 'text-ink' : 'text-ink-3',
-                ]}
-                aria-current={isActive(l.href) ? 'page' : undefined}
-              >
-                {l.label}
-              </a>
-            </li>
-          ))
-        }
-      </ul>
-    </nav>
   </div>
 </header>
 

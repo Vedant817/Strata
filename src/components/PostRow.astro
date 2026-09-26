@@ -1,0 +1,96 @@
+---
+import StatusBadge from './StatusBadge.astro';
+import { longDate, shortAgo, plural } from '../lib/format';
+
+interface Props {
+  slug: string;
+  title: string;
+  dek?: string;
+  status: 'seedling' | 'budding' | 'evergreen' | 'archived';
+  publishedAt: number | null;
+  updatedAt?: number;
+  authorName?: string;
+  topicName?: string | null;
+  readingMinutes?: number;
+  versionCount?: number;
+  annotationTotal?: number;
+  /** Ordinal in a curated list, shown as a large numeral. */
+  ordinal?: number;
+  /** Why this item is in the list. */
+  note?: string;
+  compact?: boolean;
+}
+
+const {
+  slug,
+  title,
+  dek,
+  status,
+  publishedAt,
+  updatedAt,
+  authorName,
+  topicName,
+  readingMinutes,
+  versionCount = 1,
+  annotationTotal = 0,
+  ordinal,
+  note,
+  compact = false,
+} = Astro.props;
+
+const revised = versionCount > 1;
+---
+
+<article
+  class:list={[
+    'group border-b border-rule py-6 first:border-t-0 first:pt-0 last:border-b-0',
+    compact && 'py-4',
+  ]}
+>
+  <div class="flex gap-4 sm:gap-6">
+    {
+      ordinal !== undefined && (
+        <span
+          class="meta w-6 shrink-0 pt-1 tabular-nums"
+          aria-hidden="true"
+        >
+          {String(ordinal).padStart(2, '0')}
+        </span>
+      )
+    }
+
+    <div class="min-w-0 flex-1">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <StatusBadge status={status} />
+        {topicName && <span class="meta">{topicName}</span>}
+        {revised && (
+          <a
+            href={`/w/${slug}#revisions-heading`}
+            class="meta text-accent no-underline hover:underline"
+            title={`${versionCount} revisions. Open the revision history.`}
+          >
+            revised {versionCount}× · {shortAgo(updatedAt ?? publishedAt)}
+          </a>
+        )}
+      </div>
+
+      <h3 class:list={['mt-2', compact ? 'text-[1.0625rem]' : 'text-[1.1875rem]']}>
+        <a href={`/w/${slug}`} class="no-underline transition-colors group-hover:text-accent">
+          {title}
+        </a>
+      </h3>
+
+      {dek && !compact && <p class="mt-1.5 text-[0.9375rem] leading-relaxed text-ink-2">{dek}</p>}
+
+      {note && <p class="mt-2 border-l-2 border-rule-strong pl-3 text-[0.9375rem] text-ink-2">{note}</p>}
+
+      <p class="meta mt-2.5">
+        {authorName && <span>{authorName}</span>}
+        {authorName && <span aria-hidden="true"> · </span>}
+        <span>{longDate(publishedAt)}</span>
+        {readingMinutes ? <span> · {readingMinutes} min</span> : null}
+        {annotationTotal > 0 && <span> · {plural(annotationTotal, 'note')}</span>}
+      </p>
+    </div>
+  </div>
+</article>

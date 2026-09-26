@@ -1,0 +1,82 @@
+---
+import Base from '../../layouts/Base.astro';
+import PostRow from '../../components/PostRow.astro';
+import { listAll } from '../../lib/repo/taxonomy';
+import { resolvePrefs, ANON_COOKIE } from '../../lib/prefs';
+import { plural } from '../../lib/format';
+
+const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+const prefs = resolvePrefs(Astro.cookies as never, anonId);
+
+const posts = await listAll({ includeSeedlings: true });
+const groups = [
+  { key: 'evergreen', label: 'Evergreen', blurb: 'Actively maintained. Someone is answerable for the accuracy.' },
+  { key: 'budding', label: 'Budding', blurb: 'An argument forming, with references attached to its claims.' },
+  { key: 'seedling', label: 'Seedlings', blurb: 'Published before they are finished, on purpose.' },
+  { key: 'archived', label: 'Archived', blurb: 'Kept for the record, no longer maintained.' },
+] as const;
+---
+
+<Base
+  title="Writing"
+  description="Everything published on Strata, grouped by how finished it is."
+  prefs={prefs}
+>
+  <header class="shell border-b border-rule py-12">
+    <div class="max-w-2xl">
+      <h1 class="text-3xl">Writing</h1>
+      <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">
+        {plural(posts.length, 'post')}, grouped by how finished they are rather than by date. Grouping
+        by lifecycle is the point: on most publications everything is presented as equally settled, and
+        the reader has no way to know how much weight a claim has earned.
+      </p>
+    </div>
+  </header>
+
+  <div class="shell py-12">
+    <nav aria-label="Jump to a group" class="mb-10 flex flex-wrap gap-x-5 gap-y-2 border-b border-rule pb-4">
+      {
+        groups
+          .filter((g) => posts.some((p) => p.status === g.key))
+          .map((g) => (
+            <a href={`#${g.key}`} class="meta no-underline transition-colors hover:text-ink">
+              {g.label}
+            </a>
+          ))
+      }
+    </nav>
+
+    {
+      groups.map((group) => {
+        const items = posts.filter((p) => p.status === group.key);
+        if (items.length === 0) return null;
+        return (
+          <section id={group.key} class="mb-14 scroll-mt-24 last:mb-0">
+            <div class="flex flex-wrap items-baseline justify-between gap-3 border-b border-rule pb-3">
+              <h2 class="text-xl">{group.label}</h2>
+              <p class="meta">{plural(items.length, 'post')}</p>
+            </div>
+            <p class="mt-2 max-w-xl text-[0.9375rem] text-ink-2">{group.blurb}</p>
+            <div class="mt-5">
+              {items.map((p) => (
+                <PostRow
+                  slug={p.slug}
+                  title={p.title}
+                  dek={p.dek}
+                  status={p.status}
+                  publishedAt={p.publishedAt}
+                  updatedAt={p.updatedAt}
+                  readingMinutes={p.readingMinutes}
+                  versionCount={p.versionCount}
+                  annotationTotal={p.annotationTotal}
+                  authorName={p.authorName}
+                  topicName={p.topicName}
+                />
+              ))}
+            </div>
+          </section>
+        );
+      })
+    }
+  </div>
+</Base>
