@@ -165,11 +165,21 @@ keyboard reachable · screen-reader label.
 
 ### 2.5 Performance budget (enforced in CI, Lighthouse gate)
 
-- Article page: **< 100KB** total JS, **< 15KB** critical CSS
-- LCP < 1.5s on 4G, CLS < 0.02, INP < 200ms
-- Every island lazy-hydrates via `client:visible`. The article renders and is readable with **JS
-  disabled** — the depth slider, marginalia rail, and Ask panel are progressive enhancements layered on
-  an already-complete document.
+Target: article page **< 100KB** total JS, **< 15KB** critical CSS. LCP < 1.5s on 4G, CLS < 0.02,
+INP < 200ms. Every island lazy-hydrates. The article renders and is readable with **JS disabled** — the
+depth slider, marginalia rail, and Ask panel are progressive enhancements layered on an already-complete
+document.
+
+**The target is not met, and the reason should be written down rather than absorbed.** The build ships
+**237KB** of client JS, of which **208KB is React DOM** — carried to the reader so that selecting a
+sentence and leaving a note works without a reload. The enforced budget (`npm run perf:budget`, which
+fails the build) is currently set at 280KB, i.e. it *protects the current state rather than the target*.
+That is a deliberate, recorded decision to ship, not an oversight.
+
+The honest options are: (a) convert Marginalia and DepthDial to plain DOM and script, which should land
+total JS well under 40KB and is the only way to actually meet this section, or (b) revise the target and
+say why a framework runtime is worth 208KB on a reading product. Either is defensible; leaving the
+number in a file nobody reads is not.
 
 ---
 
@@ -419,14 +429,26 @@ Everything in the original brainstorm is not v1. A half-built feature is worse t
 
 **In v1 (the proving set — enough to be a real product):**
 
-1. Living Layers: depth dial + per-block layer tags
-2. Revision history, inline diffs, "changed since your last visit", revision subscription
-3. Marginalia: typed, version-pinned, threaded, with author-only notes
-4. "Ask this article" with in-article citations
-5. Garden lifecycle states + staleness
-6. Empathy analytics v1: section depth, highlight hotspots, confusion
-7. Co-Thinking v1: capture inbox, synthesis, citation lint, voice drift
-8. **Forks with lineage** (v1.5 — the data model is v1, the UI can wait)
+Status as built. ✓ means shipped and verified in a browser; ◐ means shipped
+coherently but not the whole ambition; ○ means not built.
+
+1. Living Layers: depth dial + per-block layer tags — **✓**
+2. Revision history, inline diffs, "changed since your last visit" — **✓**
+   (revision *subscription* is ○ — the table exists, no sending job)
+3. Marginalia: typed, version-pinned, threaded, author-only notes — **✓**
+   plus reactions (anonymous-capable), edit, delete, author accept, four sort
+   modes, private notes, reports, and one-level replies
+4. "Ask this article" with in-article citations — **◐** extractive and fully
+   grounded, offline, and every question logged as a confusion signal; no model
+   attached, so it quotes rather than answers
+5. Garden lifecycle states + staleness — **✓** including authoring: review,
+   graduate, link, fork with inherited lineage
+6. Empathy analytics v1 — **◐** per-block reach is collected and the
+   confusion signal is real; the writer-facing drop-off view is ○
+7. Co-Thinking v1 — **◐** capture inbox and promotion to seedling are real;
+   weekly synthesis, citation lint and voice drift are ○
+8. **Forks with lineage** — **✓** (the data model arrived in v1, as planned;
+   the UI did not have to wait)
 
 **Explicitly deferred:**
 
@@ -452,17 +474,23 @@ product, because it makes the "fully readable with JS disabled" budget structura
 
 - **Astro 4 → current**, `output: 'server'`, **`@astrojs/node`** standalone adapter (portable; deploy
   target-agnostic). Cloudflare/Vercel are a config swap, not a rewrite.
-- **Islands:** React for the interactive surface only (depth dial, marginalia rail, Ask, presence, arc
-  diagram). Everything else is static Astro. Budget: ≤6 islands on an article page.
-- **DB + auth:** **Supabase** — Postgres, Auth (magic link + OAuth), Realtime, Storage, Edge Functions.
-  Chosen for leverage: four systems we would otherwise assemble and operate ourselves. RLS enforces
-  tenancy (private lists, private notes, author-only drafts) at the database layer, not in app code.
+- **Islands:** React for the interactive surface only (depth dial, marginalia rail, artifact). Everything
+  else is static Astro — including the note interactions, which are ordinary form posts specifically so
+  they work with JavaScript off. Budget: ≤6 islands on an article page.
+- **DB + auth:** the plan called for **Supabase** — Postgres, Auth, Realtime, Edge Functions. The build
+  uses **SQLite via libsql** instead, with handle-claim tokens rather than magic links. This is a
+  deliberate deviation, and it has costs worth recording: no RLS, so tenancy rules live in application
+  code; no Realtime, so §5's live presence is not buildable as written; no `pgvector`, so Ask retrieval is
+  lexical FTS rather than embedding-based. Migrations and the local file make a deploy a config change
+  (`DATABASE_URL`), and Turso/libsql is the intended hosted target.
 - **ORM:** Drizzle (typed, SQL-transparent, plays well with RLS).
-- **Retrieval:** Postgres FTS for search + `pgvector` for the Ask feature's retrieval and the reader's
-  constellation inference.
-- **AI:** Anthropic SDK, model behind an interface. Sonnet-class for grounded Ask; a larger class for
-  the stress-tester. Per-author daily cost caps enforced in the Edge Function.
-- **Telemetry:** first-party `read_events` in Postgres. No third-party analytics, by policy.
+- **Retrieval:** SQLite **FTS5** with porter stemming, two indexes: `post_fts` for search and
+  `block_fts` for Ask. Block scope is what makes Ask's grounding promise structural rather than a
+  convention — the post id is inside every query's filter.
+- **AI:** none attached. Ask is extractive, so the "grounded or refuse" guarantee holds without a model
+  and costs nothing. When a model arrives it answers *from the retrieved passages*, behind the
+  per-author caps.
+- **Telemetry:** first-party `read_events` in SQLite. No third-party analytics, by policy.
 - **Deploy:** Node standalone on Render (fits the existing setup). Preview deploys per PR.
 
 ### 9.2 Phase 0 — Foundation (Weeks 1–2)
