@@ -20,6 +20,11 @@ export default defineConfig({
   ],
   vite: {
     plugins: [tailwindcss()],
+    // resvg ships a native binary. Vite's dev pre-bundler tries to read it as
+    // UTF-8 JavaScript and fails, which poisons the module graph for every
+    // route — not just the share-card endpoint that uses it.
+    optimizeDeps: { exclude: ['@resvg/resvg-js'] },
+    ssr: { external: ['@resvg/resvg-js'] },
   },
   build: {
     inlineStylesheets: 'auto',

@@ -173,15 +173,33 @@ export async function redeemHandleClaim(
   let userId = existing[0]?.id;
   if (!userId) {
     userId = `u_${claim.handle}`;
-    await database.insert(users).values({
-      id: userId,
-      email: claim.email,
-      handle: claim.handle,
-      displayName: claim.handle,
-      bio: '',
-      role: 'reader',
-      createdAt: now,
-    });
+    try {
+      await database.insert(users).values({
+        id: userId,
+        email: claim.email,
+        handle: claim.handle,
+        displayName: claim.handle,
+        bio: '',
+        role: 'reader',
+        createdAt: now,
+      });
+    } catch {
+      // Almost always a duplicate email: this inbox already has a handle, and
+      // attaching a second handle to it would merge two identities that must
+      // stay separate. An uncaught constraint error would 500 here instead.
+      const byEmail = await database
+        .select({ handle: users.handle })
+        .from(users)
+        .where(eq(users.email, claim.email))
+        .limit(1);
+      const taken = byEmail[0]?.handle;
+      return {
+        ok: false,
+        error: taken
+          ? `That email already has the handle @${taken}. Claim from a browser signed in as them, or use a different email.`
+          : 'That handle could not be created. Ask for a new link and try again.',
+      };
+    }
   }
 
   const notesClaimed = await claimAnonNotes(claim.anonId, userId);

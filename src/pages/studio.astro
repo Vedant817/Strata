@@ -1,0 +1,222 @@
+---
+import Base from '../layouts/Base.astro';
+import StatusBadge from '../components/StatusBadge.astro';
+import { resolvePrefs, ANON_COOKIE } from '../lib/prefs';
+import { getIdentity } from '../lib/repo/auth';
+import { getOpenAsks, listCaptures, myPostHealth } from '../lib/repo/studio';
+import { ago, plural } from '../lib/format';
+
+/**
+ * Writer Studio, v1.
+ *
+ * Only claimed writers get in — an anonymous browser has no inbox, no posts,
+ * and no readers to be confused, so without a handle the page says so and
+ * points at claiming one instead of rendering an empty studio. Three sections,
+ * each a working loop rather than a dashboard: capture fragments, graduate
+ * them to seedlings, and see which posts need attention ordered by neglect.
+ */
+
+const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+const prefs = resolvePrefs(Astro.cookies as never, anonId);
+const identity = await getIdentity(Astro.cookies);
+
+const studioError = Astro.url.searchParams.get('studioError');
+
+const captures = identity.userId ? await listCaptures(identity.userId, 'inbox') : [];
+const seeds = identity.userId ? await listCaptures(identity.userId, 'seed') : [];
+const health = identity.userId ? await myPostHealth(identity.userId) : [];
+
+const openAsksByPost = new Map<string, Awaited<ReturnType<typeof getOpenAsks>>>();
+if (identity.userId) {
+  for (const post of health.filter((p) => p.openAsks > 0).slice(0, 5)) {
+    openAsksByPost.set(post.id, await getOpenAsks(post.id, identity.userId));
+  }
+}
+
+const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
+---
+
+<Base
+  title="Studio"
+  description="Capture fragments, graduate them to posts, and see which writing needs attention."
+  prefs={prefs}
+>
+  <header class="shell border-b border-rule py-12">
+    <div class="max-w-2xl">
+      <p class="meta">Writer studio</p>
+      <h1 class="mt-3 text-3xl">Studio</h1>
+      {!identity.userId && (
+        <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">
+          Studio belongs to a named writer — it holds your fragments, your
+          drafts and your readers' unanswered questions, and none of that has
+          anywhere to live until you{' '}
+          <a href="/write#handle" class="text-ink no-underline hover:text-accent">
+            claim a handle →
+          </a>
+        </p>
+      )}
+      {identity.userId && (
+        <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">
+          Writing as <strong class="font-medium">@{identity.handle}</strong>. Capture first,
+          publish when it earns it.
+        </p>
+      )}
+    </div>
+  </header>
+
+  {identity.userId && (
+    <div class="shell py-12">
+      <div class="max-w-2xl space-y-14">
+        {studioError && (
+          <div class="border border-danger px-4 py-3" role="alert">
+            <p class="text-[0.9375rem] text-danger">{studioError}</p>
+            <p class="meta mt-1">Nothing was changed.</p>
+          </div>
+        )}
+
+        <section aria-labelledby="capture-heading">
+          <h2 id="capture-heading" class="text-xl">Capture</h2>
+          <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+            The bottleneck is noticing, not publishing. Get the fragment down
+            in seconds; decide what it becomes later.
+          </p>
+          <form method="post" action="/api/studio" class="mt-4 border border-rule p-4">
+            <input type="hidden" name="action" value="capture" />
+            <label class="meta" for="capture-body">
+              New fragment
+            </label>
+            <textarea
+              id="capture-body"
+              name="body"
+              rows={3}
+              maxlength={4000}
+              required
+              placeholder="The sentence you do not want to lose…"
+              class="mt-1.5 w-full resize-y border border-rule bg-paper px-3 py-2 text-[0.9375rem] leading-relaxed focus:border-accent focus:outline-none"
+            />
+            <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <label class="meta flex items-center gap-2">
+                Source
+                <select
+                  name="source"
+                  class="border border-rule bg-paper px-2 py-1 text-[0.75rem] focus:border-accent focus:outline-none"
+                >
+                  {SOURCES.map((s) => (
+                    <option value={s}>{s}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="submit"
+                class="border border-ink bg-ink px-3 py-1.5 text-[0.875rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+              >
+                Capture it
+              </button>
+            </div>
+          </form>
+
+          {captures.length === 0 && seeds.length === 0 ? (
+            <p class="mt-4 border-l-2 border-rule-strong pl-3 text-[0.9375rem] text-ink-2">
+              Inbox empty. The first fragment is the hardest; after that this
+              list is the reason the next post starts itself.
+            </p>
+          ) : (
+            <ol class="mt-4 space-y-3">
+              {[...seeds, ...captures].map((c) => (
+                <li class="border border-rule p-3">
+                  <p class="text-[0.9375rem] leading-relaxed">{c.body}</p>
+                  <div class="meta mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span>{c.source}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{ago(c.capturedAt)}</span>
+                    {c.state === 'seed' && <span aria-hidden="true">·</span>}
+                    {c.state === 'seed' && <span class="text-pine">seed</span>}
+                    <span class="ml-auto flex items-center gap-2">
+                      {c.state === 'inbox' && (
+                        <form method="post" action="/api/studio" class="contents">
+                          <input type="hidden" name="action" value="state" />
+                          <input type="hidden" name="id" value={c.id} />
+                          <input type="hidden" name="to" value="seed" />
+                          <button type="submit" class="hover:text-ink">
+                            keep
+                          </button>
+                        </form>
+                      )}
+                      <form method="post" action="/api/studio" class="contents">
+                        <input type="hidden" name="action" value="promote" />
+                        <input type="hidden" name="id" value={c.id} />
+                        <button type="submit" class="hover:text-ink">
+                          {c.promotedPostId ? 'open draft →' : 'grow into a seedling →'}
+                        </button>
+                      </form>
+                      <form method="post" action="/api/studio" class="contents">
+                        <input type="hidden" name="action" value="state" />
+                        <input type="hidden" name="id" value={c.id} />
+                        <input type="hidden" name="to" value="discarded" />
+                        <button type="submit" class="hover:text-danger">
+                          discard
+                        </button>
+                      </form>
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+
+        <section aria-labelledby="attention-heading">
+          <h2 id="attention-heading" class="text-xl">Needs attention</h2>
+          <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+            Ordered by neglect: unanswered reader questions first, then stalest
+            review. Maintenance is the product, so this list is the homepage.
+          </p>
+          {health.length === 0 ? (
+            <p class="mt-4 border-l-2 border-rule-strong pl-3 text-[0.9375rem] text-ink-2">
+              No posts yet. Grow something from the inbox above.
+            </p>
+          ) : (
+            <ol class="mt-4 space-y-4">
+              {health.map((post) => (
+                <li class="border border-rule p-4">
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <StatusBadge status={post.status} />
+                    {post.openAsks > 0 && (
+                      <span class="meta text-ochre">
+                        {plural(post.openAsks, 'unanswered question')}
+                      </span>
+                    )}
+                  </div>
+                  <h3 class="mt-2 text-lg">
+                    <a href={`/w/${post.slug}`} class="no-underline hover:text-accent">
+                      {post.title}
+                    </a>
+                  </h3>
+                  <p class="meta mt-1.5">
+                    {post.versionCount} {post.versionCount === 1 ? 'version' : 'versions'} ·{' '}
+                    {plural(post.notes, 'note')} ·{' '}
+                    {post.staleDays === null
+                      ? 'never reviewed'
+                      : post.staleDays === 0
+                        ? 'reviewed today'
+                        : `reviewed ${post.staleDays}d ago`}
+                  </p>
+                  {(openAsksByPost.get(post.id) ?? []).length > 0 && (
+                    <ul class="mt-3 space-y-2 border-t border-rule pt-3">
+                      {(openAsksByPost.get(post.id) ?? []).map((q) => (
+                        <li class="text-[0.875rem] leading-relaxed text-ink-2">
+                          <span class="text-ochre">“{q.question}”</span>{' '}
+                          <span class="meta">· asked {ago(q.createdAt)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      </div>
+    </div>
+  )}
+</Base>
