@@ -279,6 +279,35 @@ const totalReactions = reactions.useful + reactions.insightful + reactions.sourc
             </button>
           </form>
         )}
+
+        {!isMine && (
+          <details class="note-disclosure">
+            <summary class="meta cursor-pointer text-ink-3 hover:text-ink">Report</summary>
+            <form method="post" action="/api/notes" class="mt-2 flex flex-wrap items-center gap-2">
+              <input type="hidden" name="action" value="report" />
+              <input type="hidden" name="noteId" value={id} />
+              <input type="hidden" name="returnTo" value={back} />
+              <label class="sr-only" for={`report-${id}`}>
+                Why does this note not belong here?
+              </label>
+              <input
+                id={`report-${id}`}
+                name="reason"
+                required
+                minlength={3}
+                maxlength={500}
+                placeholder="Spam, abuse, off-topic…"
+                class="min-w-0 flex-1 border border-rule bg-paper px-2 py-1 text-[0.8125rem] focus:border-accent focus:outline-none"
+              />
+              <button
+                type="submit"
+                class="border border-rule px-2 py-1 text-[0.8125rem] text-ink-3 transition-colors hover:border-danger hover:text-danger"
+              >
+                Flag for the author
+              </button>
+            </form>
+          </details>
+        )}
       </div>
     )
   }

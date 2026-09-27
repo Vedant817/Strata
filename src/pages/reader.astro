@@ -99,6 +99,11 @@ const behind = memory.entries.filter((e) => e.behind);
                   <a href={`/w/${n.postSlug}`} class="no-underline hover:text-ink">
                     {n.postTitle}
                   </a>
+                  {n.isPrivate && (
+                    <>
+                      {' '}· <span class="text-ochre">only you</span>
+                    </>
+                  )}
                 </p>
                 <p class="mt-1.5 text-[0.9375rem] leading-relaxed text-ink-2">{n.body}</p>
                 <p class="meta mt-1.5">

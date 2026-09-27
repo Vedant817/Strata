@@ -12,7 +12,7 @@
 
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { readyDb } from '../db';
-import { annotations, annotationReactions, users } from '../db/schema';
+import { annotations, annotationReactions, annotationReports, posts, users } from '../db/schema';
 import { nanoid } from '../ids';
 import {
   AUTHOR_ONLY_KINDS,
@@ -424,8 +424,7 @@ export async function toggleReaction(
   return true;
 }
 
-/** Which of the three reactions this reader has already given, per note. */
-export async function myReactions(
+/** Which of the three reactions this reader has already given, per note. */export async function myReactions(
   voterKey: string,
   noteIds: string[],
 ): Promise<Set<string>> {
@@ -487,3 +486,88 @@ export async function countParticipants(postId: string) {
 }
 
 export { or, inArray };
+
+/* -------------------------------------------------------------------------- */
+/* Reports                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/** File a report. One per reporter per note — piling on is not moderation. */
+export async function reportAnnotation(noteId: string, reporterKey: string, reason: string) {
+  const clean = reason.trim().slice(0, 500);
+  if (!clean) return { ok: false as const, error: 'Say why, in a few words.' };
+  const database = await readyDb();
+  const note = await getAnnotation(noteId);
+  if (!note || note.status !== 'visible') return { ok: false as const, error: 'That note is gone.' };
+  const existing = await database
+    .select({ id: annotationReports.id })
+    .from(annotationReports)
+    .where(
+      and(
+        eq(annotationReports.annotationId, noteId),
+        eq(annotationReports.reporterKey, reporterKey),
+      ),
+    )
+    .limit(1);
+  if (existing.length === 0) {
+    await database.insert(annotationReports).values({ id: nanoid(), annotationId: noteId, reporterKey, reason: clean });
+  }
+  return { ok: true as const };
+}
+
+export interface ReportedNote {
+  id: string;
+  postId: string;
+  postSlug: string;
+  postTitle: string;
+  body: string;
+  kind: string;
+  status: string;
+  reports: number;
+  latestReason: string;
+}
+
+/** Notes on this author's posts that readers flagged, most-reported first. */
+export async function getReportedNotes(authorId: string): Promise<ReportedNote[]> {
+  const database = await readyDb();
+  const rows = await database
+    .select({
+      id: annotations.id,
+      postId: annotations.postId,
+      postSlug: posts.slug,
+      postTitle: posts.title,
+      body: annotations.body,
+      kind: annotations.kind,
+      status: annotations.status,
+      reports: sql<number>`count(${annotationReports.id})`,
+      latestReason: sql<string>`max(${annotationReports.reason})`,
+    })
+    .from(annotations)
+    .innerJoin(posts, eq(annotations.postId, posts.id))
+    .innerJoin(annotationReports, eq(annotationReports.annotationId, annotations.id))
+    .where(eq(posts.authorId, authorId))
+    .groupBy(annotations.id)
+    .orderBy(sql`count(${annotationReports.id}) DESC`);
+  return rows.map((r) => ({
+    ...r,
+    reports: Number(r.reports),
+  }));
+}
+
+/** Hide or restore a note. Only the post's author — checked here, not trusted. */
+export async function setNoteStatus(
+  noteId: string,
+  authorId: string,
+  status: 'visible' | 'hidden',
+): Promise<boolean> {
+  const database = await readyDb();
+  const note = await getAnnotation(noteId);
+  if (!note) return false;
+  const [post] = await database
+    .select({ authorId: posts.authorId })
+    .from(posts)
+    .where(eq(posts.id, note.postId))
+    .limit(1);
+  if (!post || post.authorId !== authorId) return false;
+  await database.update(annotations).set({ status }).where(eq(annotations.id, noteId));
+  return true;
+}

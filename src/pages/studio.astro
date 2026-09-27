@@ -4,6 +4,7 @@ import StatusBadge from '../components/StatusBadge.astro';
 import { resolvePrefs, ANON_COOKIE } from '../lib/prefs';
 import { getIdentity } from '../lib/repo/auth';
 import { getOpenAsks, listCaptures, myPostHealth } from '../lib/repo/studio';
+import { getReportedNotes } from '../lib/repo/annotations';
 import { ago, plural } from '../lib/format';
 
 /**
@@ -32,6 +33,7 @@ if (identity.userId) {
     openAsksByPost.set(post.id, await getOpenAsks(post.id, identity.userId));
   }
 }
+const flagged = identity.userId ? await getReportedNotes(identity.userId) : [];
 
 const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
 ---
@@ -273,6 +275,59 @@ const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
             </ol>
           )}
         </section>
+
+        {flagged.length > 0 && (
+          <section aria-labelledby="flagged-heading">
+            <h2 id="flagged-heading" class="text-xl">
+              Flagged <span class="meta">· by your readers, for you to judge</span>
+            </h2>
+            <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+              A report hides nothing by itself. Read the reason; hide what does
+              not belong, dismiss the rest by leaving it visible.
+            </p>
+            <ol class="mt-4 space-y-3">
+              {flagged.map((note) => (
+                <li class="border border-rule p-4">
+                  <p class="meta">
+                    {note.kind} · {plural(note.reports, 'report')} · on{' '}
+                    <a href={`/w/${note.postSlug}`} class="no-underline hover:text-ink">
+                      {note.postTitle}
+                    </a>
+                    {note.status === 'hidden' && <span aria-hidden="true"> · </span>}
+                    {note.status === 'hidden' && <span class="text-ochre">hidden</span>}
+                  </p>
+                  <p class="mt-1.5 text-[0.875rem] leading-relaxed text-ink-2">{note.body}</p>
+                  <p class="mt-1.5 border-l-2 border-rule-strong pl-2 text-[0.8125rem] italic text-ink-3">
+                    “{note.latestReason}”
+                  </p>
+                  <form method="post" action="/api/notes" class="mt-2">
+                    <input
+                      type="hidden"
+                      name="action"
+                      value="visibility"
+                    />
+                    <input type="hidden" name="noteId" value={note.id} />
+                    <input
+                      type="hidden"
+                      name="status"
+                      value={note.status === 'hidden' ? 'visible' : 'hidden'}
+                    />
+                    <input type="hidden" name="returnTo" value="/studio" />
+                    <button
+                      type="submit"
+                      class:list={[
+                        'meta hover:text-ink',
+                        note.status === 'hidden' ? 'text-pine' : 'text-ink-3 hover:text-danger',
+                      ]}
+                    >
+                      {note.status === 'hidden' ? 'Restore' : 'Hide'}
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
       </div>
     </div>
   )}

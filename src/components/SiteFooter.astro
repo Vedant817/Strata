@@ -1,5 +1,6 @@
 ---
 const year = new Date().getUTCFullYear();
+const newsletter = Astro.url.searchParams.get('newsletter');
 ---
 
 <footer data-chrome="true" class="mt-24 border-t border-rule">
@@ -11,6 +12,39 @@ const year = new Date().getUTCFullYear();
           A publication for long-form that outlives its own publication date. Posts here carry their
           revision history, and you can set the depth you read at.
         </p>
+        {newsletter === 'done' ? (
+          <p class="meta mt-4 border border-pine px-3 py-2 text-pine">
+            You are on the list. One email a week, unsubscribe anytime.
+          </p>
+        ) : (
+          <form method="post" action="/api/newsletter" class="mt-4 flex max-w-xs gap-2">
+            <label class="sr-only" for="newsletter-email">
+              Email for the weekly digest
+            </label>
+            <input
+              id="newsletter-email"
+              name="email"
+              type="email"
+              required
+              maxlength={320}
+              autocomplete="email"
+              placeholder="you@example.com"
+              class="min-w-0 flex-1 border border-rule bg-paper px-3 py-1.5 text-[0.875rem] focus:border-accent focus:outline-none"
+            />
+            <input type="hidden" name="returnTo" value={Astro.url.pathname + Astro.url.search} />
+            <button
+              type="submit"
+              class="shrink-0 border border-ink bg-ink px-3 py-1.5 text-[0.875rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+            >
+              Follow
+            </button>
+          </form>
+        )}
+        {newsletter === 'error' && (
+          <p class="meta mt-2 text-danger" role="alert">
+            That email did not look right — nothing was saved.
+          </p>
+        )}
       </div>
 
       <div>

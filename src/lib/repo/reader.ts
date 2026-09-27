@@ -17,6 +17,7 @@ export interface ReaderNote {
   postTitle: string;
   kind: string;
   body: string;
+  isPrivate: boolean;
   createdAt: number;
 }
 
@@ -87,6 +88,7 @@ export async function getReaderMemory(anonId: string, userId: string | null) {
       id: annotations.id,
       kind: annotations.kind,
       body: annotations.body,
+      isPrivate: annotations.isPrivate,
       createdAt: annotations.createdAt,
       postSlug: posts.slug,
       postTitle: posts.title,

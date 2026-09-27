@@ -54,6 +54,7 @@ export default function Marginalia({ postId, versionId, canWriteAuthorNote, sign
   const [selection, setSelection] = useState<Selection | null>(null);
   const [kind, setKind] = useState<Kind>('comment');
   const [body, setBody] = useState('');
+  const [isPrivate, setIsPrivate] = useState(false);
   const [phase, setPhase] = useState<Phase>('loading');
   const [message, setMessage] = useState('');
   const textarea = useRef<HTMLTextAreaElement | null>(null);
@@ -65,6 +66,7 @@ export default function Marginalia({ postId, versionId, canWriteAuthorNote, sign
     setPhase('idle');
     setMessage('');
     setKind('comment');
+    setIsPrivate(false);
   }, []);
 
   /* --- selection capture ------------------------------------------------- */
@@ -200,7 +202,8 @@ export default function Marginalia({ postId, versionId, canWriteAuthorNote, sign
           suffixHint: selection.suffixHint,
           kind,
           body: body.trim(),
-        }),
+          isPrivate,
+        })
       });
       const json = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
       if (!res.ok || !json.id) {
@@ -344,11 +347,22 @@ export default function Marginalia({ postId, versionId, canWriteAuthorNote, sign
             )}
 
             <div className="mt-3 flex items-center justify-between gap-3">
-              <p className="text-[0.75rem] leading-snug text-ink-3">
-                {signedInAs
-                  ? `Posting as ${signedInAs}.`
-                  : 'Posting anonymously. You can claim these notes later.'}
-              </p>
+              <div className="min-w-0">
+                <p className="text-[0.75rem] leading-snug text-ink-3">
+                  {signedInAs
+                    ? `Posting as ${signedInAs}.`
+                    : 'Posting anonymously. You can claim these notes later.'}
+                </p>
+                <label className="mt-1.5 flex cursor-pointer items-center gap-2 text-[0.75rem] text-ink-3">
+                  <input
+                    type="checkbox"
+                    checked={isPrivate}
+                    onChange={(e) => setIsPrivate(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-[var(--accent)]"
+                  />
+                  Only I can see this
+                </label>
+              </div>
               <button
                 type="submit"
                 disabled={phase === 'saving' || !body.trim()}

@@ -10,6 +10,8 @@ import {
   editAnnotation,
   getAnnotation,
   replyToAnnotation,
+  reportAnnotation,
+  setNoteStatus,
   toggleReaction,
   voterKeyFor,
 } from './repo/annotations';
@@ -61,6 +63,18 @@ export const noteActionSchema = z.discriminatedUnion('action', [
     action: z.literal('accept'),
     noteId: z.string().min(1),
     postId: z.string().min(1),
+    returnTo,
+  }),
+  z.object({
+    action: z.literal('report'),
+    noteId: z.string().min(1),
+    reason: z.string().trim().min(3, 'Say why, in a few words.').max(500),
+    returnTo,
+  }),
+  z.object({
+    action: z.literal('visibility'),
+    noteId: z.string().min(1),
+    status: z.enum(['visible', 'hidden']),
     returnTo,
   }),
 ]);
@@ -136,6 +150,23 @@ export async function applyNoteAction(
       }
       const ok = await acceptAnnotation(input.noteId);
       return ok ? { ok: true } : { ok: false, message: 'That note is gone.' };
+    }
+
+    case 'report': {
+      const result = await reportAnnotation(
+        input.noteId,
+        voterKeyFor(identity.userId, anonId),
+        input.reason,
+      );
+      return result.ok ? { ok: true } : { ok: false, message: result.error };
+    }
+
+    case 'visibility': {
+      if (!identity.userId) {
+        return { ok: false, message: 'Only the author can do that.' };
+      }
+      const ok = await setNoteStatus(input.noteId, identity.userId, input.status);
+      return ok ? { ok: true } : { ok: false, message: 'That note is not on your post.' };
     }
   }
 }

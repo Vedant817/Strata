@@ -29,6 +29,13 @@
       "when": 1790514196398,
       "tag": "0003_block_search_index",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790517924679,
+      "tag": "0004_annotation_reports",
+      "breakpoints": true
     }
   ]
 }

@@ -319,6 +319,20 @@ export const annotationReactions = sqliteTable(
   (t) => [primaryKey({ columns: [t.annotationId, t.voterKey, t.kind] })],
 );
 
+export const annotationReports = sqliteTable(
+  'annotation_reports',
+  {
+    id: text('id').primaryKey(),
+    annotationId: text('annotation_id')
+      .notNull()
+      .references(() => annotations.id, { onDelete: 'cascade' }),
+    reporterKey: text('reporter_key').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [index('annotation_reports_note_idx').on(t.annotationId)],
+);
+
 /* -------------------------------------------------------------------------- */
 /* Reader memory                                                               */
 /* -------------------------------------------------------------------------- */
