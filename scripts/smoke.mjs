@@ -31,6 +31,8 @@ const OK = [
   '/search',
   '/search?q=caching',
   '/thesis',
+  '/reader',
+  '/studio',
   '/og/cache-invalidation-is-a-distributed-problem.png',
   '/rss.xml',
   '/robots.txt',

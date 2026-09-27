@@ -1,5 +1,5 @@
 ---
-import { resolvePrefs, THEME_COOKIE, DENSITY_COOKIE, ANON_COOKIE, type ReaderPrefs } from '../lib/prefs';
+import { resolvePrefs, THEME_COOKIE, DENSITY_COOKIE, ensureAnonId, type ReaderPrefs } from '../lib/prefs';
 import SiteHeader from '../components/SiteHeader.astro';
 import SiteFooter from '../components/SiteFooter.astro';
 import '../styles/global.css';
@@ -31,16 +31,7 @@ const {
   bodyClass = '',
 } = Astro.props;
 
-const cookies = Astro.cookies.get(ANON_COOKIE)?.value;
-const anonId = cookies ?? crypto.randomUUID();
-if (!cookies) {
-  Astro.cookies.set(ANON_COOKIE, anonId, {
-    path: '/',
-    httpOnly: false,
-    sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 365,
-  });
-}
+const anonId = ensureAnonId(Astro.cookies);
 
 const prefs = Astro.props.prefs ?? resolvePrefs(Astro.cookies as never, anonId);
 const site = Astro.site ?? new URL('http://localhost:4321');

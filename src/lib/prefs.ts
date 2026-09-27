@@ -62,3 +62,39 @@ export function resolvePrefs(
     anonId,
   };
 }
+
+type CookieJar = {
+  get(name: string): { value?: string } | undefined;
+  has(name: string): boolean;
+  set(name: string, value: string, options: Record<string, unknown>): void;
+};
+
+/**
+ * The one id for this browser, minted at most once per request.
+ *
+ * Pages used to fall back to a fresh `crypto.randomUUID()` whenever no cookie
+ * arrived — and the layout minted a *different* one for the outgoing cookie.
+ * Every first-visit write (read receipts, first notes) was then recorded
+ * under an id the browser would never send again: orphaned on arrival. The
+ * "changed since you read it" banner never fired for a first read, and reader
+ * memory missed every reader's first post.
+ *
+ * Page frontmatter runs before the layout, so the first caller mints and
+ * sets, and later callers see `has()` and must NOT mint again. A caller that
+ * arrives after the mint cannot retrieve the minted value (Astro exposes
+ * outgoing cookies through `has`, not `get`), so it gets a throwaway marked
+ * as such — safe for reads, and anything that writes must be the minter.
+ */
+export function ensureAnonId(cookies: CookieJar): string {
+  const incoming = cookies.get(ANON_COOKIE)?.value;
+  if (incoming) return incoming;
+  if (cookies.has(ANON_COOKIE)) return `transient-${crypto.randomUUID()}`;
+  const id = crypto.randomUUID();
+  cookies.set(ANON_COOKIE, id, {
+    path: '/',
+    httpOnly: false,
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 24 * 365,
+  });
+  return id;
+}

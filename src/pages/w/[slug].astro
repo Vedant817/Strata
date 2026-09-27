@@ -17,7 +17,7 @@ import { getIdentity } from '../../lib/repo/auth';
 import { countParticipants, listAnnotations, myReactions, voterKeyFor } from '../../lib/repo/annotations';
 import { askPost } from '../../lib/repo/ask';
 import { blockToPlainText } from '../../lib/blocks';
-import { resolvePrefs, ANON_COOKIE, type Depth } from '../../lib/prefs';
+import { resolvePrefs, DEPTH_COOKIE, ensureAnonId, type Depth } from '../../lib/prefs';
 import { minutesAtDepth } from '../../lib/blocks';
 import { diffStats } from '../../lib/diff';
 import { ago, longDate, shortAgo, plural, verb } from '../../lib/format';
@@ -29,7 +29,9 @@ if (!post) return new Response(null, { status: 404, statusText: 'Not found' });
 
 // Reading state. The page renders at the depth the reader chose, server-side —
 // the dial is an enhancement over a complete document, not the source of it.
-const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+// The id is minted here (not fallen back to a throwaway) because this page
+// writes read receipts under it — see `ensureAnonId`.
+const anonId = ensureAnonId(Astro.cookies);
 const identity = await getIdentity(Astro.cookies);
 const prefs = resolvePrefs(Astro.cookies as never, anonId);
 const depth: Depth = prefs.depth;
@@ -289,6 +291,12 @@ const jsonLd = [
       <div class="article-body space-y-10">
         <section aria-labelledby="depth-heading" class="border-t border-rule pt-6">
           <h2 id="depth-heading" class="meta mb-3">How deep do you want this?</h2>
+          {!Astro.cookies.has(DEPTH_COOKIE) && (
+            <p class="mb-3 max-w-xl border-l-2 border-accent pl-3 text-[0.9375rem] leading-relaxed text-ink-2">
+              First time here? <strong class="font-medium text-ink">Set your depth once</strong> and
+              every post honors it — skim the argument, read it properly, or take the footnotes too.
+            </p>
+          )}
           <DepthDial
             client:idle
             initial={depth}

@@ -1,0 +1,145 @@
+---
+import Base from '../layouts/Base.astro';
+import { resolvePrefs, ANON_COOKIE } from '../lib/prefs';
+import { getIdentity } from '../lib/repo/auth';
+import { getReaderMemory } from '../lib/repo/reader';
+import { ago } from '../lib/format';
+
+/**
+ * Your reading memory.
+ *
+ * The platform's compounding asset, shown to its owner: what you read and at
+ * which version, which posts have moved since, the notes you left, and the
+ * topics your reading reveals. Anonymous-first like everything else — keyed
+ * by browser until claimed, merged after. Empty states are invitations, not
+ * dead ends, and the forget link sits where privacy you can exercise belongs.
+ */
+
+const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+const prefs = resolvePrefs(Astro.cookies as never, anonId);
+const identity = await getIdentity(Astro.cookies);
+
+const memory = await getReaderMemory(anonId, identity.userId);
+const behind = memory.entries.filter((e) => e.behind);
+---
+
+<Base
+  title="Your reading"
+  description="What you have read, what moved since, and what you argued with in the margins."
+  prefs={prefs}
+>
+  <header class="shell border-b border-rule py-12">
+    <div class="max-w-2xl">
+      <p class="meta">Reader memory</p>
+      <h1 class="mt-3 text-3xl">Your reading</h1>
+      <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">
+        {memory.entries.length === 0
+          ? 'Nothing here yet — which is correct, because nothing has been read from this browser yet.'
+          : 'Everything this browser has read, and everything that moved since. This is private to you.'}
+      </p>
+    </div>
+  </header>
+
+  <div class="shell py-12">
+    <div class="max-w-2xl space-y-14">
+      {behind.length > 0 && (
+        <section aria-labelledby="moved-heading">
+          <h2 id="moved-heading" class="text-xl">Moved since you read</h2>
+          <ol class="mt-4 space-y-3">
+            {behind.map((e) => (
+              <li class="border border-accent bg-accent-soft px-4 py-3">
+                <a href={`/w/${e.slug}`} class="font-medium no-underline hover:text-accent">
+                  {e.title}
+                </a>
+                <p class="meta mt-1">
+                  You saw v{e.versionNumber} · now v{e.currentVersionNumber} · read {ago(e.readAt)}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      <section aria-labelledby="history-heading">
+        <h2 id="history-heading" class="text-xl">History</h2>
+        {memory.entries.length === 0 ? (
+          <p class="mt-3 border-l-2 border-rule-strong pl-3 text-[0.9375rem] text-ink-2">
+            Start with{' '}
+            <a href="/lists/start-here" class="text-ink no-underline hover:text-accent">
+              the starting order →
+            </a>
+          </p>
+        ) : (
+          <ol class="mt-4 space-y-3">
+            {memory.entries.map((e) => (
+              <li class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-rule pb-3 last:border-b-0">
+                <a href={`/w/${e.slug}`} class="no-underline hover:text-accent">
+                  {e.title}
+                </a>
+                <span class="meta">
+                  v{e.versionNumber}
+                  {e.behind ? ` · now v${e.currentVersionNumber}` : ''} · {ago(e.readAt)}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
+      {memory.notes.length > 0 && (
+        <section aria-labelledby="your-notes-heading">
+          <h2 id="your-notes-heading" class="text-xl">
+            Your margin notes <span class="meta">· {memory.notes.length}</span>
+          </h2>
+          <ol class="mt-4 space-y-4">
+            {memory.notes.map((n) => (
+              <li class="border border-rule p-4">
+                <p class="meta">
+                  {n.kind} · on{' '}
+                  <a href={`/w/${n.postSlug}`} class="no-underline hover:text-ink">
+                    {n.postTitle}
+                  </a>
+                </p>
+                <p class="mt-1.5 text-[0.9375rem] leading-relaxed text-ink-2">{n.body}</p>
+                <p class="meta mt-1.5">
+                  <a href={`/w/${n.postSlug}#note-${n.id}`} class="no-underline hover:text-ink">
+                    read in context →
+                  </a>{' '}
+                  · {ago(n.createdAt)}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {memory.topics.length > 0 && (
+        <section aria-labelledby="topics-heading">
+          <h2 id="topics-heading" class="text-xl">Your topics</h2>
+          <p class="mt-2 text-[0.9375rem] text-ink-2">
+            Revealed by reading, not stated on a form.
+          </p>
+          <ul class="mt-3 flex flex-wrap gap-2">
+            {memory.topics.map((t) => (
+              <li>
+                <a
+                  href={`/topics#${t.slug}`}
+                  class="meta no-underline border border-rule px-2 py-1 hover:border-rule-strong hover:text-ink"
+                >
+                  {t.name}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <p class="border-t border-rule pt-6 text-[0.9375rem] text-ink-2">
+        <a href="/privacy#forget" class="text-ink no-underline hover:text-accent">
+          Forget my reading history →
+        </a>{' '}
+        This page, the banners, and the receipts all empty together.
+      </p>
+    </div>
+  </div>
+</Base>
