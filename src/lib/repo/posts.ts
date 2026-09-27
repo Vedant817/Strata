@@ -375,6 +375,75 @@ export async function publishRevision(input: RevisionInput) {
   return { versionId, versionNumber: nextNumber };
 }
 
+/**
+ * The maintenance heartbeat: the author looked at this post and it still
+ * stands (optionally graduating it a lifecycle state). Staleness is a nudge,
+ * never a shame badge — but a nudge needs a way to be answered, and this is
+ * it. Separate from publishing a revision because "still true" is the most
+ * common and most valuable review outcome, and it should not require inventing
+ * a change.
+ */
+export async function markReviewed(
+  postId: string,
+  authorId: string,
+  status?: typeof posts.$inferSelect['status'],
+): Promise<boolean> {
+  const database = await readyDb();
+  const [own] = await database
+    .select({ id: posts.id })
+    .from(posts)
+    .where(and(eq(posts.id, postId), eq(posts.authorId, authorId)))
+    .limit(1);
+  if (!own) return false;
+  await database
+    .update(posts)
+    .set({ lastReviewedAt: Date.now(), updatedAt: Date.now(), ...(status ? { status } : {}) })
+    .where(eq(posts.id, postId));
+  return true;
+}
+
+/**
+ * Fork a post into your own seedling.
+ *
+ * The fork starts as a copy of the ancestor's current blocks with fresh ids —
+ * shared ids would tangle the two posts' annotation anchors — and inherits
+ * the ancestor's outbound links, so lineage compounds rather than resets. The
+ * `fork_of` edge makes the chain traversable in both directions.
+ */
+export async function forkPost(postId: string, authorId: string) {
+  const database = await readyDb();
+  const ancestor = await getPostById(postId);
+  if (!ancestor || ancestor.visibility !== 'public' || !ancestor.publishedAt) {
+    return { ok: false as const, error: 'That post cannot be forked.' };
+  }
+  const body = ancestor.blocks.map((b) => ({ ...b, id: nanoid() }));
+  const slug = `${ancestor.slug}-fork-${nanoid().slice(0, 6)}`;
+
+  const created = await createPost({
+    slug,
+    title: `Fork of ${ancestor.title}`,
+    dek: ancestor.dek,
+    authorId,
+    body,
+    status: 'seedling',
+    changeSummary: `Forked from "${ancestor.title}".`,
+    forkedFromId: ancestor.id,
+  });
+
+  const outbound = await database
+    .select()
+    .from(postLinks)
+    .where(eq(postLinks.fromPostId, ancestor.id));
+  for (const link of outbound) {
+    if (link.toPostId === ancestor.id) continue;
+    // A fork_of edge names *this* fork's ancestor, not the grandparent's —
+    // the new post gets exactly one, pointing at the post it was cut from.
+    if (link.type === 'fork_of') continue;
+    await addLink(created.postId, link.toPostId, link.type);
+  }
+  return { ok: true as const, postId: created.postId, slug };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Reader memory                                                              */
 /* -------------------------------------------------------------------------- */

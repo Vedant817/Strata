@@ -353,6 +353,30 @@ const jsonLd = [
           </ol>
         </section>
 
+        {post.visibility === 'public' && post.publishedAt && !isViewingOld && (
+          <section aria-label="Fork this post" class="border-t border-rule pt-6">
+            {identity.userId ? (
+              <form method="post" action="/api/fork" class="flex flex-wrap items-baseline gap-x-3 gap-y-2">
+                <input type="hidden" name="postId" value={post.id} />
+                <input type="hidden" name="returnTo" value={returnTo} />
+                <button type="submit" class="meta text-ink-3 no-underline hover:text-ink">
+                  Fork this post →
+                </button>
+                <span class="text-[0.8125rem] text-ink-3">
+                  Your own seedling, starting from this text. The ancestor is credited permanently.
+                </span>
+              </form>
+            ) : (
+              <p class="text-[0.8125rem] text-ink-3">
+                <a href="/write#handle" class="text-ink-3 underline hover:text-ink">
+                  Claim a handle
+                </a>{' '}
+                to fork this post into your own seedling.
+              </p>
+            )}
+          </section>
+        )}
+
         <section id="marginalia" aria-labelledby="marginalia-heading" class="border-t border-rule pt-6">
           <div class="flex flex-wrap items-baseline justify-between gap-3">
             <h2 id="marginalia-heading" class="meta">Marginalia</h2>

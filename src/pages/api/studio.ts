@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { z } from 'zod';
 import { getIdentity } from '../../lib/repo/auth';
 import { addCapture, promoteCapture, setCaptureState, type CaptureState } from '../../lib/repo/studio';
+import { addLink, getPostById, getPostBySlug, markReviewed } from '../../lib/repo/posts';
 import { safeReturnTo } from '../../lib/note-actions';
 
 /**
@@ -27,6 +28,19 @@ const schema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('promote'),
     id: z.string().min(1),
+    returnTo: z.string().optional(),
+  }),
+  z.object({
+    action: z.literal('reviewed'),
+    postId: z.string().min(1),
+    status: z.enum(['seedling', 'budding', 'evergreen']).optional(),
+    returnTo: z.string().optional(),
+  }),
+  z.object({
+    action: z.literal('link'),
+    fromPostId: z.string().min(1),
+    toSlug: z.string().min(1).max(120),
+    type: z.enum(['cites', 'extends', 'contradicts', 'mentions']),
     returnTo: z.string().optional(),
   }),
 ]);
@@ -62,15 +76,40 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url }) => {
     return redirect(ok ? back : target.pathname + target.search, 303);
   }
 
-  const promoted = await promoteCapture(input.id, identity.userId);
-  if (!promoted.ok) {
-    target.searchParams.set('studioError', promoted.error);
+  if (input.action === 'promote') {
+    const promoted = await promoteCapture(input.id, identity.userId);
+    if (!promoted.ok) {
+      target.searchParams.set('studioError', promoted.error);
+      return redirect(target.pathname + target.search, 303);
+    }
+    const post = await getPostById(promoted.postId);
+    return redirect(post ? `/w/${post.slug}` : back, 303);
+  }
+
+  if (input.action === 'reviewed') {
+    const ok = await markReviewed(input.postId, identity.userId, input.status);
+    if (!ok) target.searchParams.set('studioError', 'That post is not yours.');
+    return redirect(ok ? back : target.pathname + target.search, 303);
+  }
+
+  // Link this post to another by slug. Resolved server-side so a mistyped
+  // slug fails here with the reason, not as a dead edge in the graph.
+  const target_post = await getPostBySlug(input.toSlug.trim().toLowerCase());
+  if (!target_post) {
+    target.searchParams.set('studioError', `No post at /w/${input.toSlug.trim().toLowerCase()}.`);
     return redirect(target.pathname + target.search, 303);
   }
-  const post = await import('../../lib/repo/posts').then((m) =>
-    m.getPostById(promoted.postId),
-  );
-  return redirect(post ? `/w/${post.slug}` : back, 303);
+  const own = await getPostById(input.fromPostId);
+  if (!own || own.authorId !== identity.userId) {
+    target.searchParams.set('studioError', 'That post is not yours.');
+    return redirect(target.pathname + target.search, 303);
+  }
+  if (target_post.id === input.fromPostId) {
+    target.searchParams.set('studioError', 'A post cannot link to itself.');
+    return redirect(target.pathname + target.search, 303);
+  }
+  await addLink(input.fromPostId, target_post.id, input.type);
+  return redirect(back, 303);
 };
 
 export const GET: APIRoute = () => Response.redirect('/studio', 303);
