@@ -152,3 +152,110 @@ export async function getOpenAsks(postId: string, authorId: string) {
     .orderBy(desc(asks.createdAt))
     .limit(20);
 }
+
+/* -------------------------------------------------------------------------- */
+/* Synthesis                                                                   */
+/* -------------------------------------------------------------------------- */
+
+const STOPWORDS = new Set(
+  'about above after again against all almost also always among another around because become before behind being below between both during every first from further had having here however into itself just like made make many might more most much never often only other ought our over same should since some such than that their them then there these through under until want were what when where which while with within without would your'.split(
+    ' ',
+  ),
+);
+
+function stem(word: string): string {
+  // English plurals only, deliberately: "budgets" and "budget" are the same
+  // fragment reaching for the same post, and without this the grouping rule
+  // misses exactly the pairs it exists for. Anything cleverer belongs in a
+  // real stemmer, not in a function whose whole job is clustering inbox notes.
+  if (word.endsWith('ies') && word.length > 5) return `${word.slice(0, -3)}y`;
+  if (word.endsWith('es') && word.length > 5 && !word.endsWith('sses')) return word.slice(0, -2);
+  if (word.endsWith('s') && !word.endsWith('ss') && word.length > 4) return word.slice(0, -1);
+  return word;
+}
+
+function significantWords(body: string): Set<string> {
+  const words = body.toLowerCase().match(/[a-z][a-z'-]{4,}/g) ?? [];
+  return new Set(words.filter((w) => !STOPWORDS.has(w)).map(stem));
+}
+
+export interface SynthesisGroup {
+  ids: string[];
+  bodies: string[];
+  shared: string[];
+}
+
+/**
+ * Weekly synthesis, runnable on demand rather than on a cron that does not
+ * exist here yet. Groups inbox fragments by shared significant vocabulary —
+ * two fragments using the same unusual words are usually two halves of one
+ * post trying to happen. Pairs sharing fewer than two words are left alone;
+ * forcing unrelated fragments together is how synthesis becomes slop.
+ */
+export function synthesizeInbox(
+  captures: Array<{ id: string; body: string }>,
+): SynthesisGroup[] {
+  const sigils = captures.map((c) => ({ id: c.id, body: c.body, words: significantWords(c.body) }));
+  const used = new Set<string>();
+  const groups: SynthesisGroup[] = [];
+
+  for (let i = 0; i < sigils.length; i++) {
+    if (used.has(sigils[i]!.id)) continue;
+    const group = [sigils[i]!];
+    used.add(sigils[i]!.id);
+    for (let j = i + 1; j < sigils.length; j++) {
+      if (used.has(sigils[j]!.id)) continue;
+      // Union against the group, not just the seed: a third fragment joins on
+      // words shared with *any* member, which is how a real cluster forms.
+      const groupWords = new Set(group.flatMap((g) => [...g.words]));
+      const withGroup = [...groupWords].filter((w) => sigils[j]!.words.has(w));
+      if (withGroup.length >= 2) {
+        group.push(sigils[j]!);
+        used.add(sigils[j]!.id);
+      }
+    }
+    if (group.length >= 2) {
+      const counts = new Map<string, number>();
+      for (const g of group) for (const w of g.words) counts.set(w, (counts.get(w) ?? 0) + 1);
+      const shared = [...counts.entries()]
+        .filter(([, n]) => n >= 2)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([w]) => w);
+      groups.push({ ids: group.map((g) => g.id), bodies: group.map((g) => g.body), shared });
+    }
+  }
+  return groups;
+}
+
+/** Grow a synthesized group into a seedling, linking every member to it. */
+export async function growGroup(authorId: string, ids: string[]) {
+  const database = await readyDb();
+  const clean = [...new Set(ids)].slice(0, 20);
+  if (clean.length < 2) return { ok: false as const, error: 'A group needs at least two fragments.' };
+  const rows = await database
+    .select()
+    .from(captureItems)
+    .where(and(eq(captureItems.authorId, authorId), sql`id in (${sql.join(clean.map((c) => sql`${c}`), sql`, `)})`));
+  if (rows.length < 2) return { ok: false as const, error: 'Those captures are not yours.' };
+
+  const firstLine = rows[0]!.body.split('\n')[0]!.trim().slice(0, 90) || 'Untitled seedling';
+  const slugBase =
+    firstLine.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) ||
+    'seedling';
+  const created = await createPost({
+    slug: `${slugBase}-${nanoid().slice(0, 6)}`,
+    title: firstLine,
+    authorId,
+    body: rows.map((r) => ({ id: nanoid(), type: 'paragraph', text: r.body, layer: 'core' as const })),
+    status: 'seedling',
+    changeSummary: `Synthesized from ${rows.length} captured fragments.`,
+  });
+  for (const r of rows) {
+    await database
+      .update(captureItems)
+      .set({ state: 'draft', promotedPostId: created.postId })
+      .where(eq(captureItems.id, r.id));
+  }
+  return { ok: true as const, postId: created.postId };
+}

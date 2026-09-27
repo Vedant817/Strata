@@ -3,9 +3,10 @@ import Base from '../layouts/Base.astro';
 import StatusBadge from '../components/StatusBadge.astro';
 import { resolvePrefs, ANON_COOKIE } from '../lib/prefs';
 import { getIdentity } from '../lib/repo/auth';
-import { getOpenAsks, listCaptures, myPostHealth } from '../lib/repo/studio';
+import { getOpenAsks, listCaptures, myPostHealth, synthesizeInbox } from '../lib/repo/studio';
 import { getPostById } from '../lib/repo/posts';
 import { lintCitations, type LintReport } from '../lib/lint';
+import { driftScore, featuresOfBlocks, readVoice, type VoiceProfile } from '../lib/repo/voice';
 import { getReportedNotes } from '../lib/repo/annotations';
 import { ago, plural } from '../lib/format';
 
@@ -46,6 +47,39 @@ if (identity.userId) {
   }
 }
 const flagged = identity.userId ? await getReportedNotes(identity.userId) : [];
+
+/* Voice: the stored fingerprint, and how the newest post sits against it.
+   Refreshed on demand rather than silently — a fingerprint that updates
+   itself every publish would chase the latest post instead of judging it. */
+let voice: VoiceProfile | null = null;
+let voiceDrift: { score: number; moved: string[] } | null = null;
+let voiceLatestSlug: string | null = null;
+if (identity.userId) {
+  const { users } = await import('../lib/db/schema');
+  const { readyDb } = await import('../lib/db');
+  const { eq } = await import('drizzle-orm');
+  const database = await readyDb();
+  const [row] = await database
+    .select({ toneVector: users.toneVector })
+    .from(users)
+    .where(eq(users.id, identity.userId))
+    .limit(1);
+  voice = readVoice(row?.toneVector ?? null);
+  const newest = health[0];
+  if (voice && newest) {
+    const full = await getPostById(newest.id);
+    if (full) {
+      voiceDrift = driftScore(voice, featuresOfBlocks(full.blocks));
+      voiceLatestSlug = newest.slug;
+    }
+  }
+}
+
+/* Synthesis groups, computed live over the inbox every visit. */
+const synthGroups =
+  identity.userId && captures.length >= 2
+    ? synthesizeInbox(captures.map((c) => ({ id: c.id, body: c.body })))
+    : [];
 
 const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
 ---
@@ -178,6 +212,45 @@ const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
             </ol>
           )}
         </section>
+
+        {synthGroups.length > 0 && (
+          <section aria-labelledby="synthesis-heading">
+            <h2 id="synthesis-heading" class="text-xl">Taking shape</h2>
+            <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+              Fragments using the same unusual words are usually two halves of
+              one post trying to happen. Grow a group when it earns it; leave
+              the rest — forcing unrelated fragments together is how synthesis
+              becomes slop.
+            </p>
+            <ol class="mt-4 space-y-4">
+              {synthGroups.map((g, gi) => (
+                <li class="border border-rule p-4">
+                  <p class="meta">
+                    {g.ids.length} fragments · on {g.shared.join(', ')}
+                  </p>
+                  <ul class="mt-2 space-y-1.5">
+                    {g.bodies.map((b, bi) => (
+                      <li class="border-l-2 border-rule-strong pl-2 text-[0.875rem] leading-relaxed text-ink-2">
+                        {b.length > 220 ? `${b.slice(0, 220)}…` : b}
+                        {bi < g.bodies.length - 1 && <span class="sr-only">;</span>}
+                      </li>
+                    ))}
+                  </ul>
+                  <form method="post" action="/api/studio" class="mt-3">
+                    <input type="hidden" name="action" value="grow" />
+                    <input type="hidden" name="ids" value={g.ids.join(',')} />
+                    <button
+                      type="submit"
+                      class="border border-ink bg-ink px-3 py-1.5 text-[0.875rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+                    >
+                      Grow group {gi + 1} into a seedling →
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
 
         <section aria-labelledby="attention-heading">
           <h2 id="attention-heading" class="text-xl">Needs attention</h2>
@@ -317,6 +390,84 @@ const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
                 </li>
               ))}
             </ol>
+          )}
+        </section>
+
+        <section aria-labelledby="voice-heading">
+          <h2 id="voice-heading" class="text-xl">Voice</h2>
+          {!voice ? (
+            <>
+              <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+                No fingerprint yet. It learns from published posts — sentence
+                length, vocabulary range, how often you ask, how often you show
+                code — so there has to be something published first.
+              </p>
+              <form method="post" action="/api/studio" class="mt-3">
+                <input type="hidden" name="action" value="voice" />
+                <button
+                  type="submit"
+                  class="border border-ink bg-ink px-3 py-1.5 text-[0.875rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+                >
+                  Learn my voice
+                </button>
+              </form>
+            </>
+          ) : (
+            <>
+              <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+                Learned from {plural(voice.postCount, 'published post')}. Not
+                stylometry and not a model — sentence length, vocabulary range,
+                asking, code density. Numbers that cannot explain themselves
+                would be worse than none.
+              </p>
+              <dl class="mt-3 grid grid-cols-2 gap-x-8 gap-y-2 border border-rule p-4 sm:grid-cols-3">
+                <div>
+                  <dt class="meta">Sentences / post</dt>
+                  <dd class="mt-1 font-mono text-[0.9375rem] tabular-nums">
+                    {Math.round(voice.features.sentences)}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="meta">Words / sentence</dt>
+                  <dd class="mt-1 font-mono text-[0.9375rem] tabular-nums">
+                    {voice.features.meanSentenceWords.toFixed(1)}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="meta">Vocabulary range</dt>
+                  <dd class="mt-1 font-mono text-[0.9375rem] tabular-nums">
+                    {(voice.features.typeTokenRatio * 100).toFixed(0)}%
+                  </dd>
+                </div>
+              </dl>
+              {voiceDrift && voiceLatestSlug && (
+                <p class="mt-3 border-l-2 border-rule-strong pl-3 text-[0.9375rem] leading-relaxed text-ink-2">
+                  Latest post reads{' '}
+                  {voiceDrift.score < 0.15 ? (
+                    <>like you.</>
+                  ) : voiceDrift.score < 0.35 ? (
+                    <>
+                      a little off your fingerprint
+                      {voiceDrift.moved.length > 0 && <> — {voiceDrift.moved.join(', ')} moved</>}:
+                    </>
+                  ) : (
+                    <>
+                      nothing like your other {plural(voice.postCount, 'post')}
+                      {voiceDrift.moved.length > 0 && <> — {voiceDrift.moved.join(', ')} moved</>}:
+                    </>
+                  )}{' '}
+                  <a href={`/w/${voiceLatestSlug}`} class="text-ink no-underline hover:text-accent">
+                    read it →
+                  </a>
+                </p>
+              )}
+              <form method="post" action="/api/studio" class="mt-3">
+                <input type="hidden" name="action" value="voice" />
+                <button type="submit" class="meta text-ink-3 hover:text-ink">
+                  Re-learn from current posts
+                </button>
+              </form>
+            </>
           )}
         </section>
 

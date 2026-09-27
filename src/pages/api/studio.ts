@@ -43,6 +43,15 @@ const schema = z.discriminatedUnion('action', [
     type: z.enum(['cites', 'extends', 'contradicts', 'mentions']),
     returnTo: z.string().optional(),
   }),
+  z.object({
+    action: z.literal('grow'),
+    ids: z.string().min(1).max(2000),
+    returnTo: z.string().optional(),
+  }),
+  z.object({
+    action: z.literal('voice'),
+    returnTo: z.string().optional(),
+  }),
 ]);
 
 export const POST: APIRoute = async ({ request, cookies, redirect, url }) => {
@@ -90,6 +99,27 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url }) => {
     const ok = await markReviewed(input.postId, identity.userId, input.status);
     if (!ok) target.searchParams.set('studioError', 'That post is not yours.');
     return redirect(ok ? back : target.pathname + target.search, 303);
+  }
+
+  if (input.action === 'grow') {
+    const { growGroup } = await import('../../lib/repo/studio');
+    const grown = await growGroup(
+      identity.userId,
+      input.ids.split(',').map((s) => s.trim()).filter(Boolean),
+    );
+    if (!grown.ok) {
+      target.searchParams.set('studioError', grown.error);
+      return redirect(target.pathname + target.search, 303);
+    }
+    const post = await getPostById(grown.postId);
+    return redirect(post ? `/w/${post.slug}` : back, 303);
+  }
+
+  if (input.action === 'voice') {
+    const { refreshVoice } = await import('../../lib/repo/voice');
+    const profile = await refreshVoice(identity.userId);
+    if (!profile) target.searchParams.set('studioError', 'Nothing published to learn a voice from yet.');
+    return redirect(profile ? back : target.pathname + target.search, 303);
   }
 
   // Link this post to another by slug. Resolved server-side so a mistyped
