@@ -403,6 +403,43 @@ export async function recordRead(args: {
   await database
     .insert(readReceipts)
     .values({ id: nanoid(), postId: args.postId, versionId: args.versionId, anonId: args.anonId, userId: args.userId ?? null, readAt: now });
+
+  // The impression is the denominator for every drop-off number a writer ever
+  // sees. Without it recorded on the server, the reach beacon below has
+  // nothing to be a fraction of.
+  await database.insert(readEvents).values({
+    id: nanoid(),
+    postId: args.postId,
+    blockId: null,
+    userId: args.userId ?? null,
+    anonId: args.anonId,
+    event: 'impression',
+    createdAt: now,
+  });
+}
+
+/** One row per block the reader actually reached, batched by the client. */
+export async function recordReach(args: {
+  postId: string;
+  anonId: string;
+  userId?: string | null;
+  blockIds: string[];
+}) {
+  if (args.blockIds.length === 0) return 0;
+  const database = await readyDb();
+  const now = Date.now();
+  const rows = args.blockIds.slice(0, 400).map((blockId) => ({
+    id: nanoid(),
+    postId: args.postId,
+    blockId,
+    userId: args.userId ?? null,
+    anonId: args.anonId,
+    event: 'reached' as const,
+    positionRatio: null,
+    createdAt: now,
+  }));
+  await database.insert(readEvents).values(rows);
+  return rows.length;
 }
 
 export async function recordEvent(args: {

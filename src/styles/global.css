@@ -273,6 +273,19 @@
   @media (min-width: 768px) { padding-inline: 2.5rem; }
 }
 
+/* A horizontally scrollable nav needs its scrollbar hidden — a 6px grey bar
+   under the masthead is exactly the kind of default that reads as unconsidered.
+   The clipped item at the edge is the affordance. */
+.nav-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.nav-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 @utility measure {
   max-width: var(--measure);
   margin-inline: auto;

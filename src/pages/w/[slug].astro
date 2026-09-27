@@ -330,3 +330,14 @@ const jsonLd = [
     }
   </article>
 </Base>
+
+<script>
+  import installReachBeacon from '../../lib/reach-beacon';
+
+  // Only on the current version: drop-off against a revision nobody is reading
+  // is a number about a historical artifact.
+  const host = document.querySelector<HTMLElement>('[data-depth-host]');
+  if (host && !new URLSearchParams(location.search).has('rev')) {
+    installReachBeacon(host, '/api/telemetry');
+  }
+</script>
