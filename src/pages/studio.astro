@@ -203,6 +203,16 @@ const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
                         ? 'reviewed today'
                         : `reviewed ${post.staleDays}d ago`}
                   </p>
+                  {post.staleDays !== null && (
+                    <p class="mt-1.5">
+                      <a
+                        href={`/studio/readers/${post.slug}`}
+                        class="meta no-underline text-ink-3 hover:text-ink"
+                      >
+                        where readers get to →
+                      </a>
+                    </p>
+                  )}
                   {(openAsksByPost.get(post.id) ?? []).length > 0 && (
                     <ul class="mt-3 space-y-2 border-t border-rule pt-3">
                       {(openAsksByPost.get(post.id) ?? []).map((q) => (
