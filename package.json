@@ -14,8 +14,10 @@
     "db:seed": "tsx scripts/seed.ts",
     "db:reset": "Remove-Item -Force data/strata.db -ErrorAction SilentlyContinue; npm run db:seed",
     "lint:design": "node scripts/lint-design.mjs",
-    "verify": "npm run lint:design && npm run check",
+    "verify": "npm run lint:design && npm run check && npm run test:anchors",
     "dev:clean": "Remove-Item -Recurse -Force node_modules/.vite -ErrorAction SilentlyContinue; npm run dev",
+    "perf:budget": "tsx scripts/perf-budget.ts",
+    "test:smoke": "node scripts/smoke.mjs",
     "test:anchors": "tsx scripts/test-anchors.ts",
     "test:anchor-survival": "tsx scripts/prove-anchor-survival.ts"
   },

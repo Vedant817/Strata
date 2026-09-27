@@ -36,9 +36,25 @@ The seed is idempotent and safe to re-run after editing `src/seed/content.ts`.
 | `npm run preview` | Serve the production build |
 | `npm run check` | `astro check` + typecheck |
 | `npm run lint:design` | Fails the build on banned visual patterns (see below) |
+| `npm run verify` | Design lint, typecheck and anchor tests |
+| `npm run test:anchors` | Anchor resolution cases (exact / moved / lost) |
+| `npm run test:anchor-survival` | End-to-end proof that a note survives a rewrite |
+| `npm run test:smoke` | Boots the built server and checks 25 routes answer |
+| `npm run perf:budget` | Fails if the client bundle outgrows its budget |
 | `npm run db:seed` | Wipe and rebuild the database |
 | `npm run db:generate` | Generate a Drizzle migration from the schema |
 | `npm run db:studio` | Drizzle Studio |
+
+`npm run test:smoke` builds nothing and assumes `npm run build` has run; point
+it at an already-running server with `BASE_URL=http://localhost:4321`.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs the same checks in the same order on every push
+and pull request: design lint, typecheck, anchor tests, build, performance
+budget, seed, then the route smoke test against the built server. The database
+is a local libsql file and migrations run on first query, so there is no service
+container to configure.
 
 ## Design constraints
 

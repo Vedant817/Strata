@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Design lint first: it is milliseconds, and it is the rule that is
+      # easiest to break by accident and hardest to notice in review.
+      - name: Design lint
+        run: npm run lint:design
+
+      - name: Types and Astro diagnostics
+        run: npm run check
+
+      - name: Anchor resolution
+        run: npm run test:anchors
+
+      - name: Build
+        run: npm run build
+        env:
+          SITE_URL: https://strata.pub
+
+      - name: Performance budget
+        run: npm run perf:budget
+
+      # The database is a local libsql file and migrations run on first query,
+      # so CI needs no service container. Seeding gives the route check real
+      # posts to render rather than a wall of 404s. The smoke script boots the
+      # built server itself, so there is nothing to start by hand here.
+      - name: Seed
+        run: npm run db:seed
+
+      - name: Route smoke test
+        run: npm run test:smoke
+
+      - name: Upload build output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 3
