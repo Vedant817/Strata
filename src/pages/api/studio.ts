@@ -52,6 +52,29 @@ const schema = z.discriminatedUnion('action', [
     action: z.literal('voice'),
     returnTo: z.string().optional(),
   }),
+  z.object({
+    action: z.literal('save-draft'),
+    postId: z.string().min(1),
+    count: z.coerce.number().int().min(0).max(500),
+    returnTo: z.string().optional(),
+  }),
+  z.object({
+    action: z.literal('add-block'),
+    postId: z.string().min(1),
+    blockType: z.enum(['paragraph', 'heading', 'quote', 'code', 'list', 'callout']),
+    returnTo: z.string().optional(),
+  }),
+  z.object({
+    action: z.literal('publish'),
+    postId: z.string().min(1),
+    changeSummary: z
+      .string()
+      .trim()
+      .min(10, 'Say what changed, in at least a sentence. Future readers — and you — will thank you.')
+      .max(500),
+    isMajor: z.string().optional(),
+    returnTo: z.string().optional(),
+  }),
 ]);
 
 export const POST: APIRoute = async ({ request, cookies, redirect, url }) => {
@@ -120,6 +143,25 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url }) => {
     const profile = await refreshVoice(identity.userId);
     if (!profile) target.searchParams.set('studioError', 'Nothing published to learn a voice from yet.');
     return redirect(profile ? back : target.pathname + target.search, 303);
+  }
+
+  if (input.action === 'save-draft' || input.action === 'add-block' || input.action === 'publish') {
+    const { applyEditorAction } = await import('../../lib/repo/drafts');
+    const fields: Record<string, string> = {};
+    if (form) {
+      for (const [k, v] of form.entries()) {
+        if (typeof v === 'string') fields[k] = v;
+      }
+    }
+    const result = await applyEditorAction(input, fields, identity.userId);
+    if (!result.ok) {
+      target.searchParams.set('studioError', result.error);
+      return redirect(target.pathname + target.search, 303);
+    }
+    if (result.redirectTo) return redirect(result.redirectTo, 303);
+    const done = new URL(back, url);
+    done.searchParams.set('saved', '1');
+    return redirect(done.pathname + done.search, 303);
   }
 
   // Link this post to another by slug. Resolved server-side so a mistyped

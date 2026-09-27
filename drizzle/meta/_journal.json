@@ -43,6 +43,13 @@
       "when": 1790519244892,
       "tag": "0005_follows_and_saves",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790542231226,
+      "tag": "0006_post_drafts",
+      "breakpoints": true
     }
   ]
 }

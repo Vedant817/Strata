@@ -1,0 +1,378 @@
+---
+import Base from '../../../layouts/Base.astro';
+import { resolvePrefs, ANON_COOKIE } from '../../../lib/prefs';
+import { getIdentity } from '../../../lib/repo/auth';
+import { getPostBySlug } from '../../../lib/repo/posts';
+import { draftFromPublished, getDraft } from '../../../lib/repo/drafts';
+import { blockToPlainText } from '../../../lib/blocks';
+
+/**
+ * The block editor, and the first loom.
+ *
+ * No JavaScript: one big form for the whole document (text, layers, order
+ * numbers, delete flags), small forms to add a block, and a publish form
+ * with a *required* change summary. Reorder is explicit ordinal numbers
+ * rather than drag handles — less delightful, impossible to get wrong, and
+ * it works on every browser ever made.
+ *
+ * Text-shaped blocks edit fully. Structural kinds the editor cannot show
+ * (tables, figures, interactives) ride through verbatim and say so, so the
+ * editor cannot corrupt what it cannot render.
+ *
+ * The first loom is three steps printed at the top, and the publish lands on
+ * the diff view: edit something, publish with a summary, *see* the diff. A
+ * writer who has felt that loop once understands the product better than any
+ * onboarding copy could make them.
+ */
+
+const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+const prefs = resolvePrefs(Astro.cookies as never, anonId);
+const identity = await getIdentity(Astro.cookies);
+
+const { slug } = Astro.params;
+const post = slug ? await getPostBySlug(slug) : null;
+if (!post || !identity.userId || post.authorId !== identity.userId) {
+  return new Response(null, { status: 404, statusText: 'Not found' });
+}
+
+const existing = await getDraft(post.id, identity.userId);
+const seeded = existing ?? (await draftFromPublished(post.id, identity.userId));
+if (!seeded) return new Response(null, { status: 404, statusText: 'Not found' });
+const doc = seeded;
+const hasDraft = Boolean(existing);
+
+const studioError = Astro.url.searchParams.get('studioError');
+const saved = Astro.url.searchParams.get('saved') === '1';
+
+const LAYERS = ['core', 'understand', 'master'] as const;
+const ADDABLE = ['paragraph', 'heading', 'quote', 'code', 'list', 'callout'] as const;
+
+function blockText(b: (typeof doc.blocks)[number]): string {
+  if (b.type === 'code') return b.code;
+  if (b.type === 'list') return b.items.join('\n');
+  if ('text' in b) return b.text;
+  return blockToPlainText(b);
+}
+---
+
+<Base title={`Editing · ${doc.title}`} description={`Editing ${doc.title}.`} prefs={prefs} noindex>
+  <header class="shell border-b border-rule py-12">
+    <div class="max-w-2xl">
+      <p class="meta">
+        <a href="/studio" class="no-underline hover:text-ink">Studio</a> · Editing
+      </p>
+      <h1 class="mt-3 text-3xl">First loom</h1>
+      <ol class="mt-4 space-y-1.5 text-[0.9375rem] leading-relaxed text-ink-2">
+        <li><strong class="font-medium text-ink">1. Change something below</strong> — a sentence, a layer tag, the order.</li>
+        <li><strong class="font-medium text-ink">2. Publish with a summary</strong> — one sentence saying what moved and why.</li>
+        <li><strong class="font-medium text-ink">3. Read the diff</strong> — publish lands on it. That view is the product.</li>
+      </ol>
+      {hasDraft ? (
+        <p class="meta mt-4 text-ochre">Unsaved work from an earlier visit is loaded.</p>
+      ) : (
+        <p class="meta mt-4">Showing the published version. Nothing is changed until you save.</p>
+      )}
+    </div>
+  </header>
+
+  <div class="shell py-12">
+    <div class="max-w-2xl space-y-14">
+      {studioError && (
+        <div class="border border-danger px-4 py-3" role="alert">
+          <p class="text-[0.9375rem] text-danger">{studioError}</p>
+          <p class="meta mt-1">Nothing was changed.</p>
+        </div>
+      )}
+      {saved && (
+        <p class="meta border border-pine px-3 py-2 text-pine" role="status">
+          Draft saved. Still private — publish when it earns it.
+        </p>
+      )}
+
+      <form method="post" action="/api/studio">
+        <input type="hidden" name="action" value="save-draft" />
+        <input type="hidden" name="postId" value={post.id} />
+        <input type="hidden" name="count" value={doc.blocks.length} />
+
+        <label class="meta" for="ed-title">Title</label>
+        <input
+          id="ed-title"
+          name="title"
+          value={doc.title}
+          required
+          maxlength={200}
+          class="mt-1.5 w-full border border-rule bg-paper px-3 py-2 font-serif text-xl focus:border-accent focus:outline-none"
+        />
+
+        <label class="meta mt-4 block" for="ed-dek">Dek</label>
+        <input
+          id="ed-dek"
+          name="dek"
+          value={doc.dek}
+          maxlength={500}
+          class="mt-1.5 w-full border border-rule bg-paper px-3 py-2 text-[0.9375rem] focus:border-accent focus:outline-none"
+        />
+
+        <ol class="mt-8 space-y-6">
+          {doc.blocks.map((b, i) => (
+            <li class="border border-rule p-4">
+              <input type="hidden" name={`b_${i}_id`} value={b.id} />
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="meta">
+                  {i + 1} · {b.type}
+                </span>
+                <span class="ml-auto flex items-center gap-2">
+                  <label class="meta" for={`b_${i}_order`}>
+                    Order
+                  </label>
+                  <input
+                    id={`b_${i}_order`}
+                    name={`b_${i}_order`}
+                    type="number"
+                    value={i}
+                    min={0}
+                    max={doc.blocks.length + 5}
+                    class="w-16 border border-rule bg-paper px-2 py-1 text-[0.8125rem] tabular-nums focus:border-accent focus:outline-none"
+                  />
+                  <label class="meta" for={`b_${i}_layer`}>
+                    Layer
+                  </label>
+                  <select
+                    id={`b_${i}_layer`}
+                    name={`b_${i}_layer`}
+                    disabled={b.type === 'tldr' || b.type === 'primer'}
+                    class="border border-rule bg-paper px-2 py-1 text-[0.8125rem] focus:border-accent focus:outline-none disabled:opacity-60"
+                  >
+                    {LAYERS.map((l) => (
+                      <option value={l} selected={b.layer === l}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                  <label class="meta flex cursor-pointer items-center gap-1.5 text-danger">
+                    <input type="checkbox" name={`b_${i}_del`} value="1" class="h-3.5 w-3.5" />
+                    Delete
+                  </label>
+                </span>
+              </div>
+
+              {b.type === 'paragraph' || b.type === 'tldr' ? (
+                <textarea
+                  name={`b_${i}_text`}
+                  rows={Math.min(12, Math.max(3, Math.ceil(blockText(b).length / 90)))}
+                  maxlength={20000}
+                  class="mt-2 w-full resize-y border border-rule bg-paper px-3 py-2 text-[0.9375rem] leading-relaxed focus:border-accent focus:outline-none"
+                >
+                  {blockText(b)}
+                </textarea>
+              ) : b.type === 'heading' ? (
+                <div class="mt-2 flex gap-2">
+                  <select
+                    name={`b_${i}_level`}
+                    aria-label="Heading level"
+                    class="border border-rule bg-paper px-2 py-2 text-[0.875rem] focus:border-accent focus:outline-none"
+                  >
+                    <option value="2" selected={b.level === 2}>H2</option>
+                    <option value="3" selected={b.level === 3}>H3</option>
+                  </select>
+                  <input
+                    name={`b_${i}_text`}
+                    value={b.text}
+                    maxlength={500}
+                    class="min-w-0 flex-1 border border-rule bg-paper px-3 py-2 text-[0.9375rem] focus:border-accent focus:outline-none"
+                  />
+                </div>
+              ) : b.type === 'quote' ? (
+                <>
+                  <textarea
+                    name={`b_${i}_text`}
+                    rows={3}
+                    maxlength={20000}
+                    class="mt-2 w-full resize-y border border-rule bg-paper px-3 py-2 text-[0.9375rem] leading-relaxed italic focus:border-accent focus:outline-none"
+                  >
+                    {b.text}
+                  </textarea>
+                  <input
+                    name={`b_${i}_attr`}
+                    value={b.attribution}
+                    maxlength={200}
+                    placeholder="Attribution (optional)"
+                    aria-label="Quote attribution"
+                    class="mt-2 w-full border border-rule bg-paper px-3 py-2 text-[0.875rem] focus:border-accent focus:outline-none"
+                  />
+                </>
+              ) : b.type === 'callout' ? (
+                <>
+                  <div class="mt-2 flex gap-2">
+                    <select
+                      name={`b_${i}_tone`}
+                      aria-label="Callout tone"
+                      class="border border-rule bg-paper px-2 py-2 text-[0.875rem] focus:border-accent focus:outline-none"
+                    >
+                      <option value="note" selected={b.tone === 'note'}>note</option>
+                      <option value="warn" selected={b.tone === 'warn'}>warn</option>
+                      <option value="correction" selected={b.tone === 'correction'}>correction</option>
+                    </select>
+                    <input
+                      name={`b_${i}_ctitle`}
+                      value={b.title}
+                      maxlength={300}
+                      placeholder="Title (optional)"
+                      aria-label="Callout title"
+                      class="min-w-0 flex-1 border border-rule bg-paper px-3 py-2 text-[0.875rem] focus:border-accent focus:outline-none"
+                    />
+                  </div>
+                  <textarea
+                    name={`b_${i}_text`}
+                    rows={3}
+                    maxlength={20000}
+                    class="mt-2 w-full resize-y border border-rule bg-paper px-3 py-2 text-[0.9375rem] leading-relaxed focus:border-accent focus:outline-none"
+                  >
+                    {b.text}
+                  </textarea>
+                </>
+              ) : b.type === 'code' ? (
+                <>
+                  <input
+                    name={`b_${i}_lang`}
+                    value={b.lang}
+                    maxlength={40}
+                    aria-label="Code language"
+                    class="mt-2 w-40 border border-rule bg-paper px-3 py-2 font-mono text-[0.8125rem] focus:border-accent focus:outline-none"
+                  />
+                  <textarea
+                    name={`b_${i}_code`}
+                    rows={Math.min(16, Math.max(4, b.code.split('\n').length + 1))}
+                    maxlength={60000}
+                    spellcheck={false}
+                    class="mt-2 w-full resize-y border border-rule bg-paper px-3 py-2 font-mono text-[0.8125rem] leading-relaxed focus:border-accent focus:outline-none"
+                  >
+                    {b.code}
+                  </textarea>
+                  <input
+                    name={`b_${i}_caption`}
+                    value={b.caption}
+                    maxlength={300}
+                    placeholder="Caption (optional)"
+                    aria-label="Code caption"
+                    class="mt-2 w-full border border-rule bg-paper px-3 py-2 text-[0.875rem] focus:border-accent focus:outline-none"
+                  />
+                </>
+              ) : b.type === 'list' ? (
+                <>
+                  <textarea
+                    name={`b_${i}_items`}
+                    rows={Math.min(12, Math.max(2, b.items.length + 1))}
+                    maxlength={20000}
+                    aria-label="List items, one per line"
+                    class="mt-2 w-full resize-y border border-rule bg-paper px-3 py-2 text-[0.9375rem] leading-relaxed focus:border-accent focus:outline-none"
+                  >
+                    {b.items.join('\n')}
+                  </textarea>
+                  <p class="meta mt-1">One item per line.{b.ordered ? ' Ordered.' : ''}</p>
+                </>
+              ) : b.type === 'primer' ? (
+                <>
+                  <input
+                    name={`b_${i}_term`}
+                    value={b.term}
+                    maxlength={200}
+                    aria-label="Primer term"
+                    class="mt-2 w-full border border-rule bg-paper px-3 py-2 text-[0.875rem] focus:border-accent focus:outline-none"
+                  />
+                  <textarea
+                    name={`b_${i}_text`}
+                    rows={3}
+                    maxlength={20000}
+                    class="mt-2 w-full resize-y border border-rule bg-paper px-3 py-2 text-[0.9375rem] leading-relaxed focus:border-accent focus:outline-none"
+                  >
+                    {b.text}
+                  </textarea>
+                </>
+              ) : (
+                <p class="mt-2 border-l-2 border-rule-strong pl-3 text-[0.875rem] text-ink-3">
+                  {b.type} blocks are preserved as-is for now — this editor
+                  edits prose, headings, quotes, callouts, code, lists and
+                  primers. {blockText(b).slice(0, 140)}
+                  {blockText(b).length > 140 ? '…' : ''}
+                </p>
+              )}
+            </li>
+          ))}
+        </ol>
+
+        <div class="sticky bottom-0 mt-8 border border-rule-strong bg-surface p-4">
+          <button
+            type="submit"
+            class="w-full border border-ink bg-ink px-3 py-2 text-[0.9375rem] text-paper transition-colors hover:border-accent hover:bg-accent sm:w-auto sm:px-6"
+          >
+            Save draft
+          </button>
+          <p class="meta mt-2">Private until published. Saving never touches the live post.</p>
+        </div>
+      </form>
+
+      <section aria-labelledby="add-heading" class="border-t border-rule pt-6">
+        <h2 id="add-heading" class="text-xl">Add a block</h2>
+        <form method="post" action="/api/studio" class="mt-3 flex max-w-md gap-2">
+          <input type="hidden" name="action" value="add-block" />
+          <input type="hidden" name="postId" value={post.id} />
+          <label class="sr-only" for="add-type">Block type</label>
+          <select
+            id="add-type"
+            name="blockType"
+            class="min-w-0 flex-1 border border-rule bg-paper px-3 py-2 text-[0.9375rem] focus:border-accent focus:outline-none"
+          >
+            {ADDABLE.map((t) => (
+              <option value={t}>{t}</option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            class="shrink-0 border border-ink bg-ink px-4 py-2 text-[0.9375rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+          >
+            Add
+          </button>
+        </form>
+      </section>
+
+      <section aria-labelledby="publish-heading" class="border-t border-rule pt-6">
+        <h2 id="publish-heading" class="text-xl">Publish</h2>
+        <p class="mt-2 max-w-xl text-[0.9375rem] leading-relaxed text-ink-2">
+          Publishing freezes this draft as a new revision and clears it. The
+          summary is required — it is the entry future readers see in the
+          history, and a revision without one is a gap in the record.
+        </p>
+        <form method="post" action="/api/studio" class="mt-4 max-w-xl">
+          <input type="hidden" name="action" value="publish" />
+          <input type="hidden" name="postId" value={post.id} />
+          <label class="meta" for="pub-summary">
+            What changed, and why
+          </label>
+          <input
+            id="pub-summary"
+            name="changeSummary"
+            required
+            minlength={10}
+            maxlength={500}
+            placeholder="Fixed the benchmark — was measuring p50, not p99."
+            class="mt-1.5 w-full border border-rule bg-paper px-3 py-2 text-[0.9375rem] focus:border-accent focus:outline-none"
+          />
+          <div class="mt-3 flex flex-wrap items-center gap-3">
+            <label class="meta flex cursor-pointer items-center gap-2">
+              <input type="checkbox" name="isMajor" value="1" class="h-3.5 w-3.5 accent-[var(--accent)]" />
+              Major revision
+            </label>
+            <button
+              type="submit"
+              class="border border-accent bg-accent px-4 py-2 text-[0.9375rem] text-paper transition-colors hover:opacity-90"
+            >
+              Publish revision →
+            </button>
+          </div>
+          <p class="meta mt-2">Lands on the diff view. That is step three of the loom.</p>
+        </form>
+      </section>
+    </div>
+  </div>
+</Base>

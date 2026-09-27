@@ -137,6 +137,9 @@ export const posts = sqliteTable(
     /** Denormalised: number of annotated spans currently attached. */
     annotationCount: integer('annotation_count').notNull().default(0),
     viewCount: integer('view_count').notNull().default(0),
+    /** Work-in-progress {title, dek, blocks} JSON. Written on save, cleared on
+     *  publish, never rendered to readers. */
+    draftBody: text('draft_body'),
   },
   (t) => [
     uniqueIndex('posts_slug_uq').on(t.slug),
