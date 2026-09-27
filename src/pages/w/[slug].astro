@@ -14,7 +14,7 @@ import {
   recordRead,
 } from '../../lib/repo/posts';
 import { getIdentity } from '../../lib/repo/auth';
-import { countParticipants, listAnnotations } from '../../lib/repo/annotations';
+import { countParticipants, listAnnotations, myReactions, voterKeyFor } from '../../lib/repo/annotations';
 import { blockToPlainText } from '../../lib/blocks';
 import { resolvePrefs, ANON_COOKIE, type Depth } from '../../lib/prefs';
 import { minutesAtDepth } from '../../lib/blocks';
@@ -77,15 +77,72 @@ const allNotes = await listAnnotations(post.id, blockTexts, {
   authorId: identity.userId,
   currentVersionId: post.currentVersionId ?? '',
 });
+
+/** Sort modes. "Contested" is the one that matters: a post where readers
+ *  disagree with each other is where the argument is actually happening, and
+ *  ordering by age hides it under whoever typed first. */
+const NOTE_SORTS = ['newest', 'top', 'contested', 'author'] as const;
+type NoteSort = (typeof NOTE_SORTS)[number];
+const sortParam = Astro.url.searchParams.get('notes');
+const noteSort: NoteSort = (NOTE_SORTS as readonly string[]).includes(sortParam ?? '')
+  ? (sortParam as NoteSort)
+  : 'newest';
+
+const reactionTotal = (n: (typeof allNotes)[number]) =>
+  n.reactions.useful + n.reactions.insightful + n.reactions.source;
+
+const sortNotes = (list: typeof allNotes) => {
+  const copy = [...list];
+  switch (noteSort) {
+    case 'top':
+      return copy.sort((a, b) => reactionTotal(b) - reactionTotal(a) || a.createdAt - b.createdAt);
+    case 'contested':
+      // Disagreement first, then the notes drawing the most response.
+      return copy.sort((a, b) => {
+        const rank = (n: (typeof allNotes)[number]) =>
+          (n.kind === 'disagreement' || n.kind === 'correction' ? 1000 : 0) + n.replies;
+        return rank(b) - rank(a) || a.createdAt - b.createdAt;
+      });
+    case 'author':
+      return copy.sort((a, b) => Number(b.isAuthor) - Number(a.isAuthor) || a.createdAt - b.createdAt);
+    default:
+      return copy.sort((a, b) => b.createdAt - a.createdAt);
+  }
+};
+
 const rootNotes = allNotes.filter((n) => !n.parentId);
+const repliesByParent: Record<string, typeof allNotes> = {};
+for (const note of allNotes) {
+  if (!note.parentId) continue;
+  (repliesByParent[note.parentId] ??= []).push(note);
+}
+for (const list of Object.values(repliesByParent)) {
+  list.sort((a, b) => a.createdAt - b.createdAt);
+}
+
 const notesByBlock: Record<string, typeof rootNotes> = {};
-for (const note of rootNotes) {
+for (const note of sortNotes(rootNotes)) {
   (notesByBlock[note.blockId] ??= []).push(note);
 }
+
 const participants = await countParticipants(post.id);
 const myNoteCount = allNotes.filter((n) => n.isMine).length;
 const isPostAuthor = identity.userId === post.authorId;
 const staleNotes = allNotes.filter((n) => n.onOlderRevision).length;
+
+/** Which reactions this reader has already given, so the buttons can be pressed
+ *  rather than merely counted. */
+const myReactionSet = await myReactions(
+  voterKeyFor(identity.userId, anonId),
+  allNotes.map((n) => n.id),
+);
+const mineReactions = [...myReactionSet];
+
+/** Where a form post should return to: this page, query string intact, so the
+ *  reader lands back on the revision or sort they were reading. */
+const returnTo = Astro.url.pathname + Astro.url.search;
+const noteError = Astro.url.searchParams.get('noteError');
+const errorNoteId = Astro.url.searchParams.get('note');
 
 const title = isViewingOld ? `${post.title} (revision ${view.current.versionNumber})` : post.title;
 const description = post.seoDescription || stripInline(post.dek);
@@ -168,6 +225,19 @@ const jsonLd = [
         }
 
         {
+          noteError && (
+            <div
+              class="border border-danger px-4 py-3"
+              role="alert"
+              id={errorNoteId ? `error-for-note-${errorNoteId}` : undefined}
+            >
+              <p class="text-[0.9375rem] text-danger">{noteError}</p>
+              <p class="meta mt-1">Nothing was changed.</p>
+            </div>
+          )
+        }
+
+        {
           isViewingOld && (
             <div class="border border-ochre px-4 py-3">
               <p class="text-[0.9375rem]">
@@ -196,7 +266,12 @@ const jsonLd = [
           diffSegments={isViewingOld && view.compared ? diffByBlock : undefined}
           changeStatus={isViewingOld && view.compared ? changeByBlock : undefined}
           notes={notesByBlock}
+          replies={repliesByParent}
           postSlug={post.slug}
+          postId={post.id}
+          canAccept={isPostAuthor}
+          returnTo={returnTo}
+          mine={mineReactions}
         />
       </div>
     </div>
@@ -294,6 +369,31 @@ const jsonLd = [
               <p class="mt-2 max-w-xl text-[0.875rem] leading-relaxed text-ochre">
                 {`${plural(staleNotes, 'note')} here ${verb(staleNotes, 'argues', 'argue')} with an earlier revision of this post and ${verb(staleNotes, 'links', 'link')} to it.`}
               </p>
+            )
+          }
+
+          {
+            allNotes.length > 1 && (
+              <nav aria-label="Order the notes" class="mt-3 flex flex-wrap items-center gap-2">
+                <span class="meta">Order</span>
+                {NOTE_SORTS.map((s) => (
+                  <a
+                    href={`?notes=${s}`}
+                    aria-current={noteSort === s ? 'true' : undefined}
+                    class:list={[
+                      'meta no-underline transition-colors',
+                      noteSort === s ? 'text-accent' : 'text-ink-3 hover:text-ink',
+                    ]}
+                  >
+                    {s}
+                  </a>
+                ))}
+                {noteSort !== 'newest' && (
+                  <a href={Astro.url.pathname} class="meta text-ink-3 no-underline hover:text-ink">
+                    reset
+                  </a>
+                )}
+              </nav>
             )
           }
         </section>

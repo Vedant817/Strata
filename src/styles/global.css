@@ -468,6 +468,35 @@
   border-inline-start: 2px solid var(--accent);
 }
 
+/* A reply sits inside its parent's rail entry, so it reads as a continuation
+   rather than a second thing arguing with the same sentence. */
+.note-reply {
+  background: color-mix(in oklab, var(--sunken) 45%, transparent);
+  padding-block: 0.5rem;
+  padding-inline-start: 0.75rem;
+}
+
+/* Disclosure for the reply and edit forms. `details` rather than a toggle island:
+   these have to work before hydration, and a form that only exists once React
+   has loaded is a form most readers never get. */
+.note-disclosure > summary {
+  list-style: none;
+  display: inline-block;
+}
+.note-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.note-disclosure > summary::after {
+  content: ' +';
+  color: var(--ink-3);
+}
+.note-disclosure[open] > summary::after {
+  content: ' –';
+}
+.note-disclosure > summary:hover::after {
+  color: var(--ink);
+}
+
 /* The floating affordance that appears next to a selection.
    `fixed`, not `absolute`: the island is positioned with viewport coordinates
    measured from the selection rect, and `absolute` would resolve them against

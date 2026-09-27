@@ -333,16 +333,66 @@ export async function deleteAnnotation(id: string, opts: { authorId?: string | n
   return true;
 }
 
-/** Author accepts a note; it is folded into the post's history as an amendment. */
-export async function acceptAnnotation(id: string, postAuthorId: string) {
+/** Author accepts a note; it is folded into the post's history as an amendment.
+ *
+ *  Authorization is the caller's job, because only the caller knows which post
+ *  the note belongs to. This used to re-check `note.authorId === postAuthorId`,
+ *  which is the wrong question entirely: it asked whether the *note's* author is
+ *  the *post's* author, so the only note an author could ever accept was one of
+ *  their own — precisely the case acceptance exists to exclude. */
+export async function acceptAnnotation(id: string) {
   const database = await readyDb();
   const note = await getAnnotation(id);
-  if (!note || note.authorId !== postAuthorId) return false;
+  if (!note) return false;
   await database.update(annotations).set({ isAccepted: true, isResolved: true }).where(eq(annotations.id, id));
   return true;
 }
 
-export async function toggleReaction(annotationId: string, userId: string, kind: 'useful' | 'insightful' | 'source') {
+/** A reply to an existing note.
+ *
+ *  The reply inherits its parent's anchor rather than carrying one of its own.
+ *  A reply is a response to that specific sentence, not a fresh claim about the
+ *  post, and a second anchor would let a thread drift away from the prose it is
+ *  arguing about — which is the one thing the margin rail exists to prevent. */
+export async function replyToAnnotation(input: {
+  parentId: string;
+  body: string;
+  anonId: string;
+  authorId: string | null;
+}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const parent = await getAnnotation(input.parentId);
+  if (!parent || parent.status !== 'visible') {
+    return { ok: false, error: 'The note you replied to is gone.' };
+  }
+  const anchor = safeAnchor(parent.anchor);
+  if (!anchor) {
+    return { ok: false, error: 'That note has lost its anchor, so it cannot be replied to.' };
+  }
+  const created = await createAnnotation({
+    postId: parent.postId,
+    versionId: parent.versionId,
+    blockId: parent.blockId,
+    anchor,
+    body: input.body,
+    kind: 'comment',
+    anonId: input.anonId,
+    authorId: input.authorId,
+    parentId: input.parentId,
+  });
+  return { ok: true, id: created.id };
+}
+
+/** A stable key for whoever is reacting: the claimed account if there is one,
+ *  otherwise this browser's anonymous id. */
+export function voterKeyFor(authorId: string | null, anonId: string): string {
+  return authorId ? `u:${authorId}` : `a:${anonId}`;
+}
+
+export async function toggleReaction(
+  annotationId: string,
+  voterKey: string,
+  kind: 'useful' | 'insightful' | 'source',
+) {
   const database = await readyDb();
   const existing = await database
     .select()
@@ -350,7 +400,7 @@ export async function toggleReaction(annotationId: string, userId: string, kind:
     .where(
       and(
         eq(annotationReactions.annotationId, annotationId),
-        eq(annotationReactions.userId, userId),
+        eq(annotationReactions.voterKey, voterKey),
         eq(annotationReactions.kind, kind),
       ),
     )
@@ -361,7 +411,7 @@ export async function toggleReaction(annotationId: string, userId: string, kind:
       .where(
         and(
           eq(annotationReactions.annotationId, annotationId),
-          eq(annotationReactions.userId, userId),
+          eq(annotationReactions.voterKey, voterKey),
           eq(annotationReactions.kind, kind),
         ),
       );
@@ -369,9 +419,26 @@ export async function toggleReaction(annotationId: string, userId: string, kind:
   }
   await database
     .insert(annotationReactions)
-    .values({ annotationId, userId, kind })
+    .values({ annotationId, voterKey, kind })
     .onConflictDoNothing();
   return true;
+}
+
+/** Which of the three reactions this reader has already given, per note. */
+export async function myReactions(
+  voterKey: string,
+  noteIds: string[],
+): Promise<Set<string>> {
+  if (noteIds.length === 0) return new Set();
+  const database = await readyDb();
+  const rows = await database
+    .select({
+      annotationId: annotationReactions.annotationId,
+      kind: annotationReactions.kind,
+    })
+    .from(annotationReactions)
+    .where(and(eq(annotationReactions.voterKey, voterKey), inArray(annotationReactions.annotationId, noteIds)));
+  return new Set(rows.map((r) => `${r.annotationId}:${r.kind}`));
 }
 
 /** Attach every anonymous note from this browser to a claimed account. */

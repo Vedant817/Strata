@@ -8,6 +8,13 @@
       "when": 1790455208420,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790495384501,
+      "tag": "0001_anonymous_annotation_reactions",
+      "breakpoints": true
     }
   ]
 }

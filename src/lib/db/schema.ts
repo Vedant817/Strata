@@ -306,13 +306,17 @@ export const annotationReactions = sqliteTable(
     annotationId: text('annotation_id')
       .notNull()
       .references(() => annotations.id, { onDelete: 'cascade' }),
-    userId: text('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Who reacted: a claimed user id, or an anonymous browser id.
+     *
+     *  Deliberately *not* a foreign key. The reaction keys used to point at
+     *  `users.id`, which meant a reader who had never claimed a handle could not
+     *  react at all — a hard contradiction of the one rule this product has:
+     *  arguing in the margin never asks for an account. */
+    voterKey: text('voter_key').notNull(),
     kind: text('kind', { enum: ['useful', 'insightful', 'source'] }).notNull(),
     createdAt: integer('created_at').notNull().default(now),
   },
-  (t) => [primaryKey({ columns: [t.annotationId, t.userId, t.kind] })],
+  (t) => [primaryKey({ columns: [t.annotationId, t.voterKey, t.kind] })],
 );
 
 /* -------------------------------------------------------------------------- */

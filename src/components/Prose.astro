@@ -22,7 +22,13 @@ interface Props {
   changeStatus?: Record<string, 'added' | 'removed' | 'modified' | 'unchanged'>;
   /** Notes to render in the margin, keyed by block id. */
   notes?: Record<string, AnnotationView[]>;
+  /** Replies to render beneath their parent note. */
+  replies?: Record<string, AnnotationView[]>;
   postSlug?: string;
+  postId?: string;
+  canAccept?: boolean;
+  returnTo?: string;
+  mine?: string[];
   versionNumber?: number;
 }
 
@@ -31,7 +37,12 @@ const {
   diffSegments,
   changeStatus,
   notes = {},
+  replies = {},
   postSlug = '',
+  postId = '',
+  canAccept = false,
+  returnTo = '',
+  mine = [],
 } = Astro.props;
 
 /** Diff segments arrive pre-rendered from the inline-aware tokeniser, so a code
@@ -236,13 +247,20 @@ const segHtml = (segments: Array<{ type: string; html?: string; text: string }>)
                     authorName={note.authorName}
                     authorHandle={note.authorHandle}
                     createdAt={note.createdAt}
+                    editedAt={note.editedAt}
                     isAuthor={note.isAuthor}
+                    isMine={note.isMine}
                     isAccepted={note.isAccepted}
                     onOlderRevision={note.onOlderRevision}
                     anchorLost={note.resolved.status === 'lost'}
                     quote={note.anchor.quote}
                     versionNumber={note.versionNumber}
                     postSlug={postSlug}
+                    postId={postId}
+                    canAccept={canAccept}
+                    returnTo={returnTo}
+                    mine={mine}
+                    replies={replies[note.id] ?? []}
                     reactions={note.reactions}
                   />
                 ))

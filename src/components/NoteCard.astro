@@ -1,6 +1,11 @@
 ---
 import { relativeTime } from '../lib/format';
 import type { AnnotationKind } from '../lib/db/schema';
+import type { AnnotationView } from '../lib/repo/annotations';
+// Self-referential: a reply renders as a note, one level down and without its own
+// reply affordance. Aliased because the import would otherwise collide with this
+// component's own name.
+import NoteReply from './NoteCard.astro';
 
 interface Props {
   id: string;
@@ -9,13 +14,27 @@ interface Props {
   authorName: string;
   authorHandle: string | null;
   createdAt: number;
+  editedAt?: number | null;
   isAuthor: boolean;
+  /** This reader wrote it — the only condition under which edit and delete show. */
+  isMine?: boolean;
   isAccepted: boolean;
   onOlderRevision: boolean;
   anchorLost: boolean;
   quote: string;
   versionNumber: number;
   postSlug: string;
+  postId?: string;
+  /** The post's author may fold a correction into the revision history. */
+  canAccept?: boolean;
+  /** Where to send the reader back to. Same page, query string intact. */
+  returnTo?: string;
+  /** Reaction kinds this reader has already given, as `noteId:kind`. */
+  mine?: string[];
+  replies?: AnnotationView[];
+  /** 0 for a note on the margin, 1 for a reply. Replies do not thread further:
+   *  a conversation three deep is unreadable in a 19rem rail. */
+  depth?: number;
   reactions?: { useful: number; insightful: number; source: number };
 }
 
@@ -26,13 +45,21 @@ const {
   authorName,
   authorHandle,
   createdAt,
+  editedAt,
   isAuthor,
+  isMine = false,
   isAccepted,
   onOlderRevision,
   anchorLost,
   quote,
   versionNumber,
   postSlug,
+  postId = '',
+  canAccept = false,
+  returnTo = '',
+  mine = [],
+  replies = [],
+  depth = 0,
   reactions = { useful: 0, insightful: 0, source: 0 },
 } = Astro.props;
 
@@ -45,6 +72,27 @@ const LABELS: Record<AnnotationKind, string> = {
   update: 'Update',
   author_note: 'Author’s note',
 };
+
+const REACTIONS = [
+  { kind: 'useful', label: 'useful' },
+  { kind: 'insightful', label: 'insightful' },
+  { kind: 'source', label: 'sourced' },
+] as const;
+
+/* Only these kinds argue *with* the post, so only these are worth accepting
+   into the revision history as an attributed amendment. */
+const ACCEPTABLE: AnnotationKind[] = ['correction', 'disagreement', 'update', 'extension'];
+
+const mineSet = new Set(mine);
+const back = returnTo || Astro.url.pathname + Astro.url.search;
+/* Replies do not thread further and do not carry reactions: a conversation
+   three deep is unreadable in a 19rem rail. But a reply is still its author's
+   words, so edit and delete stay available on it. */
+const canReact = depth === 0;
+const canReply = depth === 0;
+const canEdit = isMine;
+const showAccept = canAccept && !isMine && !isAccepted && ACCEPTABLE.includes(kind);
+const totalReactions = reactions.useful + reactions.insightful + reactions.source;
 ---
 
 <article
@@ -52,6 +100,7 @@ const LABELS: Record<AnnotationKind, string> = {
   class:list={[
     'border-b border-rule py-3 last:border-b-0 first:pt-0',
     isAuthor && 'note-author pl-3',
+    depth > 0 && 'note-reply border-l-2 border-rule pl-3',
   ]}
   data-note-id={id}
   data-note-kind={kind}
@@ -63,11 +112,13 @@ const LABELS: Record<AnnotationKind, string> = {
     </span>
   </p>
 
-  {quote && (
-    <blockquote class="mt-1.5 border-l-2 border-rule-strong pl-2 text-[0.8125rem] leading-snug text-ink-3 italic">
-      {quote}
-    </blockquote>
-  )}
+  {
+    quote && depth === 0 && (
+      <blockquote class="mt-1.5 border-l-2 border-rule-strong pl-2 text-[0.8125rem] leading-snug text-ink-3 italic">
+        {quote}
+      </blockquote>
+    )
+  }
 
   <p class="mt-1.5 text-[0.875rem] leading-relaxed text-ink-2">{body}</p>
 
@@ -83,6 +134,20 @@ const LABELS: Record<AnnotationKind, string> = {
     }
     <span aria-hidden="true">·</span>
     <span>{relativeTime(createdAt)}</span>
+    {
+      editedAt && (
+        <>
+          <span aria-hidden="true">·</span>
+          <span title={new Date(editedAt).toISOString()}>edited</span>
+        </>
+      )
+    }
+    {/* The share unit: a link to this note alone, not to the post. Arguing with
+        one sentence is a better object to send than a URL. */}
+    <span aria-hidden="true">·</span>
+    <a href={`/w/${postSlug}#note-${id}`} class="no-underline hover:text-ink">
+      link
+    </a>
   </p>
 
   {
@@ -104,16 +169,168 @@ const LABELS: Record<AnnotationKind, string> = {
   }
 
   {
-    (reactions.useful > 0 || reactions.insightful > 0 || reactions.source > 0) && (
-      <p class="meta mt-1.5">
-        {[
-          reactions.useful > 0 && `${reactions.useful} useful`,
-          reactions.insightful > 0 && `${reactions.insightful} insightful`,
-          reactions.source > 0 && `${reactions.source} sourced`,
-        ]
-          .filter(Boolean)
-          .join(' · ')}
-      </p>
+    canReact && (
+      <div class="mt-2 flex flex-wrap items-center gap-1.5">
+        {REACTIONS.map((r) => {
+          const given = mineSet.has(`${id}:${r.kind}`);
+          const count = reactions[r.kind];
+          return (
+            <form method="post" action="/api/notes" class="contents">
+              <input type="hidden" name="action" value="react" />
+              <input type="hidden" name="noteId" value={id} />
+              <input type="hidden" name="kind" value={r.kind} />
+              <input type="hidden" name="returnTo" value={back} />
+              <button
+                type="submit"
+                aria-pressed={given}
+                class:list={[
+                  'border px-2 py-1 text-[0.75rem] transition-colors',
+                  given
+                    ? 'border-accent text-accent'
+                    : 'border-rule text-ink-3 hover:border-rule-strong hover:text-ink',
+                ]}
+              >
+                {r.label}
+                {count > 0 && <span class="tabular-nums"> {count}</span>}
+              </button>
+            </form>
+          );
+        })}
+        {totalReactions === 0 && (
+          <span class="meta ml-1">Was this worth reading?</span>
+        )}
+      </div>
+    )
+  }
+
+  {
+    (canReply || canEdit) && (
+      <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+        {canReply && (
+          <details class="note-disclosure">
+            <summary class="meta cursor-pointer text-ink-3 hover:text-ink">Reply</summary>
+            <form method="post" action="/api/notes" class="mt-2">
+              <input type="hidden" name="action" value="reply" />
+              <input type="hidden" name="parentId" value={id} />
+              <input type="hidden" name="returnTo" value={back} />
+              <label class="sr-only" for={`reply-${id}`}>
+                Reply to this note
+              </label>
+              <textarea
+                id={`reply-${id}`}
+                name="body"
+                rows={3}
+                maxlength={4000}
+                required
+                placeholder="Argue with this, or add what it left out."
+                class="w-full resize-y border border-rule bg-paper px-3 py-2 text-[0.875rem] leading-relaxed focus:border-accent focus:outline-none"
+              />
+              <button
+                type="submit"
+                class="mt-1.5 border border-ink bg-ink px-3 py-1 text-[0.8125rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+              >
+                Post reply
+              </button>
+            </form>
+          </details>
+        )}
+
+        {canEdit && (
+          <details class="note-disclosure">
+            <summary class="meta cursor-pointer text-ink-3 hover:text-ink">Edit</summary>
+            <form method="post" action="/api/notes" class="mt-2">
+              <input type="hidden" name="action" value="edit" />
+              <input type="hidden" name="noteId" value={id} />
+              <input type="hidden" name="returnTo" value={back} />
+              <label class="sr-only" for={`edit-${id}`}>
+                Edit your note
+              </label>
+              <textarea
+                id={`edit-${id}`}
+                name="body"
+                rows={3}
+                maxlength={4000}
+                required
+                class="w-full resize-y border border-rule bg-paper px-3 py-2 text-[0.875rem] leading-relaxed focus:border-accent focus:outline-none"
+              >
+                {body}
+              </textarea>
+              <button
+                type="submit"
+                class="mt-1.5 border border-ink bg-ink px-3 py-1 text-[0.8125rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+              >
+                Save
+              </button>
+            </form>
+          </details>
+        )}
+
+        {canEdit && (
+          <form method="post" action="/api/notes" class="contents">
+            <input type="hidden" name="action" value="remove" />
+            <input type="hidden" name="noteId" value={id} />
+            <input type="hidden" name="returnTo" value={back} />
+            <button
+              type="submit"
+              class="meta text-ink-3 hover:text-danger"
+              onclick="return confirm('Delete this note? Replies to it stay, but the note itself goes.')"
+            >
+              Delete
+            </button>
+          </form>
+        )}
+      </div>
+    )
+  }
+
+  {
+    showAccept && (
+      <form method="post" action="/api/notes" class="mt-2">
+        <input type="hidden" name="action" value="accept" />
+        <input type="hidden" name="noteId" value={id} />
+        <input type="hidden" name="postId" value={postId} />
+        <input type="hidden" name="returnTo" value={back} />
+        <button
+          type="submit"
+          class="border border-pine px-2 py-1 text-[0.75rem] text-pine transition-colors hover:bg-pine hover:text-paper"
+        >
+          Accept this into the revision history
+        </button>
+        <p class="mt-1 text-[0.75rem] leading-snug text-ink-3">
+          It becomes an attributed amendment, and {authorName} is credited on it.
+        </p>
+      </form>
+    )
+  }
+
+  {
+    replies.length > 0 && (
+      <div class="mt-2 space-y-1">
+        {replies.map((child) => (
+          <NoteReply
+            id={child.id}
+            kind={child.kind}
+            body={child.body}
+            authorName={child.authorName}
+            authorHandle={child.authorHandle}
+            createdAt={child.createdAt}
+            editedAt={child.editedAt}
+            isAuthor={child.isAuthor}
+            isMine={child.isMine}
+            isAccepted={child.isAccepted}
+            onOlderRevision={child.onOlderRevision}
+            anchorLost={child.resolved.status === 'lost'}
+            quote={child.anchor.quote}
+            versionNumber={child.versionNumber}
+            postSlug={postSlug}
+            postId={postId}
+            canAccept={canAccept}
+            returnTo={returnTo}
+            mine={mine}
+            depth={depth + 1}
+          />
+        ))}
+      </div>
     )
   }
 </article>

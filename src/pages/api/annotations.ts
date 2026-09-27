@@ -4,15 +4,11 @@ import { readyDb } from '../../lib/db';
 import { blocks, postVersions, posts } from '../../lib/db/schema';
 import { getIdentity } from '../../lib/repo/auth';
 import {
-  acceptAnnotation,
   createAnnotation,
-  deleteAnnotation,
-  editAnnotation,
   makeAnchor,
   resolveAnchor,
 } from '../../lib/repo/annotations';
 import { ANNOTATION_KINDS, type AnnotationKind } from '../../lib/db/schema';
-import { ANON_COOKIE } from '../../lib/prefs';
 
 const MAX_BODY = 4000;
 
@@ -143,47 +139,22 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   );
 };
 
-/** Edit, delete, or (for the post's author) accept a note. */
-export const PATCH: APIRoute = async ({ request, cookies }) => {
-  let payload: Record<string, unknown>;
-  try {
-    payload = await request.json();
-  } catch {
-    return bad('Expected a JSON body.');
-  }
-  const id = typeof payload.id === 'string' ? payload.id : '';
-  if (!id) return bad('Missing note id.');
-
-  const identity = await getIdentity(cookies);
-  const anonId = cookies.get(ANON_COOKIE)?.value ?? '';
-
-  if (payload.action === 'accept') {
-    const postId = typeof payload.postId === 'string' ? payload.postId : '';
-    if (!(await postOwns(identity.userId, postId))) return bad('Only the author can accept.', 403);
-    const ok = await acceptAnnotation(id, identity.userId!);
-    return ok
-      ? new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json' } })
-      : bad('Could not accept that note.', 409);
-  }
-
-  if (payload.action === 'delete') {
-    const ok = await deleteAnnotation(id, { authorId: identity.userId, anonId });
-    return ok
-      ? new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json' } })
-      : bad('You can only delete your own notes.', 403);
-  }
-
-  const body = typeof payload.body === 'string' ? payload.body.trim() : '';
-  if (!body) return bad('A note needs some text.');
-  if (body.length > MAX_BODY) return bad(`Keep notes under ${MAX_BODY} characters.`);
-  const ok = await editAnnotation(id, body, identity.userId, anonId);
-  return ok
-    ? new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json' } })
-    : bad('You can only edit your own notes.', 403);
-};
+/** Edit, delete and accept moved to Astro actions in `src/actions/index.ts`.
+ *
+ *  They were implemented here first and had no way to be reached: a JSON PATCH
+ *  endpoint that no server-rendered form pointed at, and no island called
+ *  either. Being a form action means they work with JavaScript off, which is
+ *  the only reason a reader can use them at all. */
+export const PATCH: APIRoute = () =>
+  new Response(
+    JSON.stringify({
+      error: 'Use the note actions. They are form posts, so they work without JavaScript.',
+    }),
+    { status: 405, headers: { 'content-type': 'application/json', allow: 'POST' } },
+  );
 
 export const GET: APIRoute = () =>
-  new Response(JSON.stringify({ error: 'POST to create a note, PATCH to edit one.' }), {
+  new Response(JSON.stringify({ error: 'POST to create a note.' }), {
     status: 405,
-    headers: { 'content-type': 'application/json', allow: 'POST, PATCH' },
+    headers: { 'content-type': 'application/json', allow: 'POST' },
   });
