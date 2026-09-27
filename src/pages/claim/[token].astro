@@ -1,0 +1,81 @@
+---
+/**
+ * Redeem a handle claim. Single-use, 20-minute expiry, and it backfills every
+ * anonymous note from the browser that asked for it.
+ */
+import Base from '../../layouts/Base.astro';
+import { redeemHandleClaim } from '../../lib/repo/auth';
+import { getIdentity } from '../../lib/repo/auth';
+import { resolvePrefs, ANON_COOKIE } from '../../lib/prefs';
+import { plural } from '../../lib/format';
+
+const { token } = Astro.params;
+const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+const prefs = resolvePrefs(Astro.cookies as never, anonId);
+
+let handle = '';
+let notesClaimed = 0;
+let error = '';
+let ok = false;
+
+if (token) {
+  const result = await redeemHandleClaim(token, Astro.cookies);
+  if (result.ok) {
+    ok = true;
+    handle = result.handle;
+    notesClaimed = result.notesClaimed;
+  } else {
+    error = result.error;
+  }
+}
+
+const identity = await getIdentity(Astro.cookies);
+---
+
+<Base title={ok ? 'Handle claimed' : 'Claim that handle'} prefs={prefs}>
+  <div class="shell py-16">
+    <div class="max-w-xl">
+      {
+        ok ? (
+          <>
+            <p class="meta">@{handle}</p>
+            <h1 class="mt-3 text-3xl">Handle claimed</h1>
+            <p class="mt-5 text-[1.0625rem] leading-relaxed text-ink-2">
+              {notesClaimed > 0
+                ? `Every note you had written from this browser — ${plural(notesClaimed, 'note')} — is now attributed to @${handle}. Nothing was recreated and nothing was orphaned.`
+                : `You are now writing as @${handle}. There were no anonymous notes to attach, which is fine.`}
+            </p>
+            <ul class="mt-8 space-y-2">
+              <li>
+                <a href="/writing" class="text-ink no-underline hover:text-accent">
+                  Read the writing →
+                </a>
+              </li>
+              <li>
+                <a href={`/a/${handle}`} class="text-ink no-underline hover:text-accent">
+                  Your author page →
+                </a>
+              </li>
+            </ul>
+          </>
+        ) : (
+          <>
+            <h1 class="text-3xl">That link did not work</h1>
+            <p class="mt-5 text-[1.0625rem] leading-relaxed text-ink-2">{error}</p>
+            <p class="mt-5 text-[0.9375rem] leading-relaxed text-ink-2">
+              {identity.handle
+                ? `You already write as @${identity.handle} on this browser.`
+                : 'You can request a fresh one from the write page.'}
+            </p>
+            <a
+              href="/write#handle"
+              class="mt-6 inline-block border border-ink bg-ink px-3 py-1.5 text-[0.9375rem] text-paper no-underline transition-colors hover:border-accent hover:bg-accent"
+            >
+              Back to claiming a handle
+            </a>
+          </>
+        )
+      }
+    </div>
+  </div>
+</Base>

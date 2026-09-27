@@ -1,0 +1,163 @@
+---
+import Base from '../../layouts/Base.astro';
+import ArcGraph from '../../components/ArcGraph.astro';
+import PostRow from '../../components/PostRow.astro';
+import { getGraph, listAll } from '../../lib/repo/taxonomy';
+import { getLineage } from '../../lib/repo/posts';
+import { resolvePrefs, ANON_COOKIE } from '../../lib/prefs';
+import { plural, longDate } from '../../lib/format';
+
+const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+const prefs = resolvePrefs(Astro.cookies as never, anonId);
+
+const { nodes, edges } = await getGraph();
+const all = await listAll();
+
+
+// Forks are the interesting part of a link graph, so surface them explicitly
+// rather than leaving them buried as arcs.
+const forked = all.filter((p) => nodes.find((n) => n.slug === p.slug)?.forks === 1);
+const withLineage = [];
+for (const p of forked.slice(0, 6)) {
+  const node = nodes.find((n) => n.slug === p.slug);
+  if (!node) continue;
+  withLineage.push({ post: p, lineage: await getLineage(node.id) });
+}
+
+const unlinked = nodes.filter(
+  (n) => !edges.some((e) => e.fromIndex === nodes.indexOf(n) || e.toIndex === nodes.indexOf(n)),
+);
+---
+
+<Base
+  title="Constellations"
+  description="How the writing here connects: what cites what, what contradicts what, and where the thinking branches."
+  prefs={prefs}
+>
+  <header class="shell border-b border-rule py-12">
+    <div class="max-w-2xl">
+      <h1 class="text-3xl">Constellations</h1>
+      <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">
+        Posts are not an archive. They are a body of work, and the interesting structure is which
+        idea leaned on which, which one contradicts another, and where a thought got picked up and
+        carried somewhere else entirely.
+      </p>
+      <p class="mt-3 text-[1.0625rem] leading-relaxed text-ink-2">
+        This is drawn as arcs over publication order rather than as a force-directed graph, because
+        a hairball is unreadable past a dozen nodes and time is usually the axis that matters. The
+        mark on the spine is rust where a post has been revised more than once.
+      </p>
+    </div>
+  </header>
+
+  <div class="shell py-12">
+    <div class="flex flex-wrap items-baseline justify-between gap-4 border-b border-rule pb-3">
+      <h2 class="text-xl">The whole body of work</h2>
+      <p class="meta">
+        {plural(nodes.length, 'post')} · {plural(edges.length, 'link')}
+      </p>
+    </div>
+
+    <div class="mt-6">
+      <ArcGraph nodes={nodes} edges={edges} />
+    </div>
+
+    {
+      unlinked.length > 0 && (
+        <p class="mt-6 max-w-2xl text-[0.9375rem] leading-relaxed text-ink-2">
+          <span class="text-ochre">{plural(unlinked.length, 'post')}</span>{' '}
+          {unlinked.length === 1 ? 'connects' : 'connect'} to nothing else here yet. On a graph this
+          small that is worth noticing: it is usually a post that could be linked to, or a post that
+          should not have been published in isolation.
+        </p>
+      )
+    }
+
+    <section class="mt-16" aria-labelledby="lineage-heading">
+      <div class="flex flex-wrap items-baseline justify-between gap-4 border-b border-rule pb-3">
+        <h2 id="lineage-heading" class="text-xl">Branches</h2>
+        <p class="meta">a fork credits its ancestor permanently</p>
+      </div>
+      <p class="mt-3 max-w-2xl text-[0.9375rem] leading-relaxed text-ink-2">
+        Forking takes a post and writes your own version of it, keeping the chain traversable in both
+        directions. It is the most honest form of citation there is, because the lineage stays
+        visible instead of becoming a footnote.
+      </p>
+
+      {
+        withLineage.length === 0 ? (
+          <p class="mt-6 text-[0.9375rem] text-ink-3">
+            Nothing has been forked yet. If you want to take one of these arguments somewhere it was
+            not taken, that is what this is for.
+          </p>
+        ) : (
+          <div class="mt-6 max-w-3xl">
+            {withLineage.map(({ post, lineage }) => (
+              <div class="border-b border-rule py-5 last:border-b-0">
+                <h3 class="text-[1.0625rem]">
+                  <a href={`/w/${post.slug}`} class="no-underline hover:text-accent">
+                    {post.title}
+                  </a>
+                </h3>
+                <p class="meta mt-1.5">
+                  {longDate(post.publishedAt)} · {post.authorName}
+                </p>
+                {lineage.ancestors.length > 0 && (
+                  <ol class="mt-2 space-y-1 border-l border-rule pl-3 text-[0.875rem]">
+                    {lineage.ancestors.map((a) => (
+                      <li>
+                        <span class="meta">{a.depth} deep</span>{' '}
+                        <a href={`/w/${a.slug}`} class="text-ink-2 no-underline hover:text-accent">
+                          {a.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                {lineage.descendants.length > 0 && (
+                  <p class="mt-2 text-[0.875rem] text-ink-2">
+                    Forked into:{' '}
+                    {lineage.descendants.map((d, i) => (
+                      <>
+                        {i > 0 && ', '}
+                        <a href={`/w/${d.slug}`} class="no-underline hover:text-accent">
+                          {d.title}
+                        </a>
+                      </>
+                    ))}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )
+      }
+    </section>
+
+    <section class="mt-16" aria-labelledby="all-posts-heading">
+      <div class="border-b border-rule pb-3">
+        <h2 id="all-posts-heading" class="text-xl">Everything</h2>
+      </div>
+      <div class="mt-5 max-w-3xl">
+        {
+          all.map((p) => (
+            <PostRow
+              slug={p.slug}
+              title={p.title}
+              dek={p.dek}
+              status={p.status}
+              publishedAt={p.publishedAt}
+              updatedAt={p.updatedAt}
+              readingMinutes={p.readingMinutes}
+              versionCount={p.versionCount}
+              annotationTotal={p.annotationTotal}
+              authorName={p.authorName}
+              topicName={p.topicName}
+              compact
+            />
+          ))
+        }
+      </div>
+    </section>
+  </div>
+</Base>

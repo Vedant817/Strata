@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type SubmitEvent } from 'react';
 
 /**
  * The reading loop's only interaction: select a sentence, say something about
@@ -56,7 +56,6 @@ export default function Marginalia({ postId, versionId, canWriteAuthorNote, sign
   const [body, setBody] = useState('');
   const [phase, setPhase] = useState<Phase>('loading');
   const [message, setMessage] = useState('');
-  const [mine, setMine] = useState(0);
   const textarea = useRef<HTMLTextAreaElement | null>(null);
   const composer = useRef<HTMLDivElement | null>(null);
 
@@ -180,10 +179,9 @@ export default function Marginalia({ postId, versionId, canWriteAuthorNote, sign
       if (q) q.textContent = selection.quote;
       if (p) p.textContent = body;
     }
-    setMine((n) => n + 1);
   }
 
-  async function submit(e: React.FormEvent) {
+  async function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!selection || !body.trim()) return;
     setPhase('saving');

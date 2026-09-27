@@ -1,0 +1,129 @@
+---
+/**
+ * Constellations, drawn as an arc diagram.
+ *
+ * Deliberately not a force-directed graph. A hairball is the lazy, generic
+ * answer to "show me a graph" and it is unreadable past ~15 nodes — and it looks
+ * like every knowledge-graph toy ever shipped. Nodes sit on a vertical spine in
+ * publication order, so time is legible, and links are arcs between them, so
+ * lineage is legible. Labels are type, not coloured dots.
+ */
+import type { GraphEdge, GraphNode } from '../lib/repo/taxonomy';
+
+interface Props {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+const { nodes, edges } = Astro.props;
+
+const ROW = 62;
+const LABEL_X = 0;
+const AXIS_X = 200;
+const W = 640;
+const H = nodes.length * ROW + 40;
+const ARC_W = 300;
+
+const y = (i: number) => 28 + i * ROW;
+
+/** Arcs bulge right; longer connections bulge further, so overlap reads as depth. */
+const arc = (a: number, b: number) => {
+  const from = y(a);
+  const to = y(b);
+  const span = Math.abs(to - from);
+  const reach = Math.min(ARC_W, 26 + span * 0.55);
+  return `M ${AXIS_X} ${from} C ${AXIS_X + reach} ${from}, ${AXIS_X + reach} ${to}, ${AXIS_X} ${to}`;
+};
+
+const stroke: Record<GraphEdge['type'], string> = {
+  fork_of: 'var(--pine)',
+  contradicts: 'var(--danger)',
+  extends: 'var(--accent)',
+  cites: 'var(--rule-strong)',
+  mentions: 'var(--rule)',
+};
+
+const TITLES: Record<GraphEdge['type'], string> = {
+  fork_of: 'forked from',
+  contradicts: 'contradicts',
+  extends: 'extends',
+  cites: 'cites',
+  mentions: 'mentions',
+};
+---
+
+<div class="overflow-x-auto border border-rule bg-surface">
+  <svg
+    viewBox={`0 0 ${W} ${H}`}
+    class="w-full min-w-[36rem]"
+    role="img"
+    aria-label={`Constellation diagram: ${nodes.length} posts and ${edges.length} links between them.`}
+  >
+    {/* The spine: publication order, oldest at the top. */}
+    <line x1={AXIS_X} x2={AXIS_X} y1="16" y2={H - 24} stroke="var(--rule)" stroke-width="1" />
+
+    {
+      edges.map((e) => (
+        <path
+          d={arc(e.fromIndex, e.toIndex)}
+          fill="none"
+          stroke={stroke[e.type]}
+          stroke-width={e.type === 'fork_of' ? 1.5 : 1}
+          stroke-dasharray={e.type === 'mentions' ? '2 3' : undefined}
+          opacity={e.type === 'cites' || e.type === 'mentions' ? 0.6 : 1}
+        >
+          <title>{`${nodes[e.fromIndex]?.title} ${TITLES[e.type]} ${nodes[e.toIndex]?.title}`}</title>
+        </path>
+      ))
+    }
+
+    {
+      nodes.map((n, i) => (
+        <g>
+          <a href={`/w/${n.slug}`} class="no-underline">
+            {/* Generous invisible hit area: the label is the target, not a 4px dot. */}
+            <rect x={LABEL_X} y={y(i) - 20} width={AXIS_X + 12} height={ROW - 8} fill="transparent" />
+            <text
+              x={LABEL_X}
+              y={y(i) + 4}
+              font-size="12"
+              fill="var(--ink)"
+              font-family="var(--font-serif)"
+            >
+              {n.title.length > 34 ? `${n.title.slice(0, 33)}…` : n.title}
+            </text>
+            <line
+              x1={AXIS_X - 5}
+              x2={AXIS_X + 5}
+              y1={y(i)}
+              y2={y(i)}
+              stroke={n.versionCount > 1 ? 'var(--accent)' : 'var(--ink-3)'}
+              stroke-width={n.versionCount > 1 ? 2 : 1.25}
+            />
+            <text
+              x={AXIS_X + 14}
+              y={y(i) + 4}
+              font-size="10"
+              fill="var(--ink-3)"
+              font-family="var(--font-mono)"
+            >
+              {n.versionCount > 1 ? `${n.versionCount}×` : n.authorHandle}
+            </text>
+            <title>{`${n.title} — ${n.authorName}, ${n.versionCount} revision${n.versionCount === 1 ? '' : 's'}`}</title>
+          </a>
+        </g>
+      ))
+    }
+  </svg>
+</div>
+
+<ul class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+  {
+    (['extends', 'contradicts', 'cites', 'fork_of', 'mentions'] as const).map((t) => (
+      <li class="meta flex items-center gap-2">
+        <span class="inline-block h-px w-5" style={`background: ${stroke[t]}`} aria-hidden="true" />
+        {TITLES[t]}
+      </li>
+    ))
+  }
+</ul>

@@ -181,7 +181,6 @@ export async function getRevisionView(
   postId: string,
   versionNumber?: number,
 ): Promise<RevisionView | null> {
-  const database = await readyDb();
   const target = versionNumber
     ? await getVersionByNumber(postId, versionNumber)
     : (await getPostById(postId))?.version ?? null;

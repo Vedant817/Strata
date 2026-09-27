@@ -11,7 +11,7 @@
 import { eq } from 'drizzle-orm';
 import { readyDb } from '../src/lib/db';
 import { annotations, posts } from '../src/lib/db/schema';
-import { parseBody, serializeBody, blockToPlainText, type Block } from '../src/lib/blocks';
+import { parseBody, blockToPlainText, type Block } from '../src/lib/blocks';
 import { resolveAnchor, type Anchor } from '../src/lib/repo/annotations';
 import { publishRevision } from '../src/lib/repo/posts';
 
@@ -20,18 +20,29 @@ const database = await readyDb();
 const [post] = await database.select().from(posts).where(eq(posts.slug, 'cache-invalidation-is-a-distributed-problem')).limit(1);
 if (!post) throw new Error('seed post missing — run npm run db:seed');
 
-// The note we just posted in the browser is the one whose body mentions the LRU.
 const all = await database.select().from(annotations).where(eq(annotations.postId, post.id));
-const target = all.find((a) => a.body.includes('pod LRU')) ?? all[0];
-if (!target) throw new Error('no annotation to test against');
+if (all.length === 0) throw new Error('no annotations on this post to test against');
 
-const anchor = JSON.parse(target.anchor) as Anchor;
 const current = await database.query.postVersions.findFirst({
   where: (t, { eq }) => eq(t.id, post.currentVersionId!),
 });
 if (!current) throw new Error('current version missing');
 
 const before = parseBody(current.body);
+
+/* The edit below inserts a clause into prose, so only a paragraph block can
+   prove anything. Falling back to "any annotation" used to silently pick a
+   callout, leave the text untouched, and then report the resulting "exact"
+   resolve as a failure of the anchoring system rather than of the fixture. */
+const paragraphs = all.filter((a) => before.find((b) => b.id === a.blockId)?.type === 'paragraph');
+if (paragraphs.length === 0) {
+  console.log('SKIPPED — this post has no note on a paragraph block.');
+  console.log('Leave a margin note on a paragraph, then run this again.');
+  process.exit(1);
+}
+
+const target = paragraphs.find((a) => a.body.includes('pod LRU')) ?? paragraphs[0]!;
+const anchor = JSON.parse(target.anchor) as Anchor;
 const block = before.find((b) => b.id === target.blockId);
 if (!block) throw new Error('annotated block missing from current version');
 
@@ -64,9 +75,9 @@ const resolved = resolveAnchor(anchor, newText);
 
 console.log(`\npublished revision ${r.versionNumber}`);
 console.log(`anchor now       : ${resolved.status} at ${resolved.start}`);
-console.log(
-  `expected         : moved (offsets shifted by ${resolved.start - anchor.start}, sentence intact)`,
-);
+if (resolved.status === 'exact') {
+  console.log('expected         : moved — the inserted clause should have shifted the offset');
+}
 console.log(
   resolved.status === 'moved'
     ? '\nPASS — the note survived the edit and the page will offer the previous revision.'

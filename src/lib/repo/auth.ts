@@ -11,7 +11,7 @@
  * an account.
  */
 
-import { and, eq, gt, isNull, lt, or } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, lt, or } from 'drizzle-orm';
 import type { AstroCookies } from 'astro';
 import { readyDb } from '../db';
 import { handleClaims, sessions, users } from '../db/schema';
@@ -208,6 +208,10 @@ export async function getPendingClaim(anonId: string) {
         gt(handleClaims.expiresAt, Date.now()),
       ),
     )
+    /* A browser can hold more than one unredeemed claim. The newest is the one
+       the reader just asked for, and it is the only one whose link they have, so
+       ordering has to be explicit rather than whatever the index returns. */
+    .orderBy(desc(handleClaims.createdAt))
     .limit(1);
   return rows[0] ?? null;
 }

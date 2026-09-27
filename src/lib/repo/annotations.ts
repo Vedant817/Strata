@@ -10,7 +10,7 @@
  *     belongs to — it never silently re-attaches to different prose.
  */
 
-import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { readyDb } from '../db';
 import { annotations, annotationReactions, users } from '../db/schema';
 import { nanoid } from '../ids';

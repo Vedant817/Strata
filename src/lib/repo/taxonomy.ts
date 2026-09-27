@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, inArray, sql } from 'drizzle-orm';
 import { readyDb } from '../db';
 import {
   annotations,
-  postVersions,
+  postLinks,
   posts,
   readingListItems,
   readingLists,
@@ -201,6 +201,89 @@ export async function listReadingLists(): Promise<ListWithItems[]> {
 export async function getReadingList(slug: string): Promise<ListWithItems | null> {
   const all = await listReadingLists();
   return all.find((l) => l.slug === slug) ?? null;
+}
+
+/**
+ * The whole graph: every post as a node, every declared link as an edge.
+ *
+ * Modelled from the start even though nothing rendered it until Phase 5, because
+ * retrofitting a graph onto a pile of posts is the expensive way round.
+ */
+export interface GraphNode {
+  id: string;
+  slug: string;
+  title: string;
+  status: Post['status'];
+  authorHandle: string;
+  authorName: string;
+  publishedAt: number | null;
+  versionCount: number;
+  forks: number;
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+  type: 'cites' | 'extends' | 'contradicts' | 'fork_of' | 'mentions';
+  /** Resolved for rendering; both ends are real post ids. */
+  fromIndex: number;
+  toIndex: number;
+}
+
+export async function getGraph(): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+  const database = await readyDb();
+  const postRows = await database
+    .select({
+      id: posts.id,
+      slug: posts.slug,
+      title: posts.title,
+      status: posts.status,
+      publishedAt: posts.publishedAt,
+      authorHandle: users.handle,
+      authorName: users.displayName,
+      versionCount,
+      forkedFromId: posts.forkedFromId,
+    })
+    .from(posts)
+    .innerJoin(users, eq(posts.authorId, users.id))
+    .where(eq(posts.visibility, 'public'))
+    .orderBy(asc(posts.publishedAt));
+
+  const linkRows = await database.select().from(postLinks);
+
+  // Index by publication order, which is what the timeline axis means.
+  const nodes: GraphNode[] = postRows.map((p) => ({
+    id: p.id,
+    slug: p.slug,
+    title: p.title,
+    status: p.status,
+    authorHandle: p.authorHandle,
+    authorName: p.authorName,
+    publishedAt: p.publishedAt,
+    versionCount: Number(p.versionCount ?? 1),
+    forks: p.forkedFromId ? 1 : 0,
+  }));
+
+  const index = new Map(nodes.map((n, i) => [n.id, i]));
+
+  const edges: GraphEdge[] = [];
+  for (const l of linkRows) {
+    const from = index.get(l.fromPostId);
+    const to = index.get(l.toPostId);
+    if (from === undefined || to === undefined) continue;
+    edges.push({ from: l.fromPostId, to: l.toPostId, type: l.type, fromIndex: from, toIndex: to });
+  }
+
+  // Fork lineage counts too — a fork is an edge with credit attached.
+  for (const n of nodes) {
+    const parent = postRows.find((p) => p.id === n.id)?.forkedFromId;
+    if (!parent) continue;
+    const to = index.get(parent);
+    if (to === undefined) continue;
+    edges.push({ from: n.id, to: parent, type: 'fork_of', fromIndex: index.get(n.id)!, toIndex: to });
+  }
+
+  return { nodes, edges };
 }
 
 export async function getSeries() {

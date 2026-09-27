@@ -67,9 +67,10 @@ const graph = jsonLd.length
     <meta name="twitter:description" content={description} />
 
     <link rel="alternate" type="application/rss+xml" title="Strata — all writing" href="/rss.xml" />
+    <link rel="sitemap" type="application/xml" href="/sitemap-index.xml" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 
-    {graph && <script type="application/ld+json" set:html={graph} />}
+    {graph && <script is:inline type="application/ld+json" set:html={graph} />}
 
     {/* Runs before first paint so a reader on a dark OS never sees a white flash. */}
     <script is:inline define:vars={{ themeCookie: THEME_COOKIE, densityCookie: DENSITY_COOKIE }}>
