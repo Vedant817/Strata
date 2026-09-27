@@ -14,7 +14,11 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   const form = await request.formData().catch(() => null);
   const handle = form?.get('handle');
   const email = form?.get('email');
-  const anonId = (form?.get('anon') as string) || cookies.get(ANON_COOKIE)?.value || '';
+  /* The cookie is the identity, never the form field. A hidden field is
+     attacker-supplied: honouring it would let one browser claim another's
+     notes, and a stale field would orphan the very notes being claimed. The
+     field stays only so the form works before the cookie is set. */
+  const anonId = cookies.get(ANON_COOKIE)?.value || (form?.get('anon') as string) || '';
 
   if (typeof handle !== 'string' || typeof email !== 'string') {
     return new Response('Missing handle or email.', { status: 400 });

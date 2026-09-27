@@ -1,11 +1,14 @@
 ---
 import Base from '../layouts/Base.astro';
-import { resolvePrefs, ANON_COOKIE } from '../lib/prefs';
+import { resolvePrefs, ensureAnonId } from '../lib/prefs';
 import { isMailConfigured } from '../lib/mail';
 import { getIdentity, getPendingClaim } from '../lib/repo/auth';
 import { pruneClaims } from '../lib/repo/auth';
 
-const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+// Must be the minted-and-set id, not a throwaway: this value goes in a hidden
+// field and is what the claim endpoint attaches to, so a second, different id
+// here would silently orphan the notes and saves the reader is claiming.
+const anonId = ensureAnonId(Astro.cookies);
 const prefs = resolvePrefs(Astro.cookies as never, anonId);
 const identity = await getIdentity(Astro.cookies);
 void pruneClaims();

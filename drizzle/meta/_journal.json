@@ -36,6 +36,13 @@
       "when": 1790517924679,
       "tag": "0004_annotation_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790519244892,
+      "tag": "0005_follows_and_saves",
+      "breakpoints": true
     }
   ]
 }

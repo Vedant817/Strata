@@ -203,6 +203,8 @@ export async function redeemHandleClaim(
   }
 
   const notesClaimed = await claimAnonNotes(claim.anonId, userId);
+  const { claimAnonMemory } = await import('./reader');
+  await claimAnonMemory(claim.anonId, userId);
   await database
     .update(handleClaims)
     .set({ redeemedAt: now })

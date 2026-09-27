@@ -505,6 +505,35 @@ export const newsletterSubscribers = sqliteTable('newsletter_subscribers', {
   createdAt: integer('created_at').notNull().default(now),
 });
 
+export const follows = sqliteTable(
+  'follows',
+  {
+    /** `u:<userId>` or `a:<anonId>` — following never asks for an account. */
+    followerKey: text('follower_key').notNull(),
+    authorId: text('author_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.followerKey, t.authorId] })],
+);
+
+export const savedPosts = sqliteTable(
+  'saved_posts',
+  {
+    /** `u:<userId>` or `a:<anonId>` — saving never asks for an account. */
+    saverKey: text('saver_key').notNull(),
+    postId: text('post_id')
+      .notNull()
+      .references(() => posts.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [
+    primaryKey({ columns: [t.saverKey, t.postId] }),
+    index('saved_posts_post_idx').on(t.postId),
+  ],
+);
+
 /* -------------------------------------------------------------------------- */
 /* Types                                                                       */
 /* -------------------------------------------------------------------------- */

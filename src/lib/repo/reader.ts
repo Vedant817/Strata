@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
 import { readyDb } from '../db';
-import { annotations, posts, postVersions, readReceipts, topics } from '../db/schema';
+import { annotations, follows, posts, postVersions, readReceipts, savedPosts, topics } from '../db/schema';
 
 export interface ReadEntry {
   slug: string;
@@ -113,5 +113,98 @@ export async function getReaderMemory(anonId: string, userId: string | null) {
     entries,
     notes: noteRows as ReaderNote[],
     topics: topicRows,
+    saved: await getSaved(memoryKeyFor(userId, anonId)),
+    followed: await getFollowedAuthors(memoryKeyFor(userId, anonId)),
   };
+}
+
+/** The same key convention as reactions: claimed account, else this browser. */
+export function memoryKeyFor(authorId: string | null, anonId: string): string {
+  return authorId ? `u:${authorId}` : `a:${anonId}`;
+}
+
+export async function isFollowing(followerKey: string, authorId: string): Promise<boolean> {
+  const database = await readyDb();
+  const rows = await database
+    .select({ followerKey: follows.followerKey })
+    .from(follows)
+    .where(and(eq(follows.followerKey, followerKey), eq(follows.authorId, authorId)))
+    .limit(1);
+  return rows.length > 0;
+}
+
+export async function toggleFollow(followerKey: string, authorId: string): Promise<boolean> {
+  const database = await readyDb();
+  if (await isFollowing(followerKey, authorId)) {
+    await database
+      .delete(follows)
+      .where(and(eq(follows.followerKey, followerKey), eq(follows.authorId, authorId)));
+    return false;
+  }
+  await database.insert(follows).values({ followerKey, authorId }).onConflictDoNothing();
+  return true;
+}
+
+export async function isSaved(saverKey: string, postId: string): Promise<boolean> {
+  const database = await readyDb();
+  const rows = await database
+    .select({ saverKey: savedPosts.saverKey })
+    .from(savedPosts)
+    .where(and(eq(savedPosts.saverKey, saverKey), eq(savedPosts.postId, postId)))
+    .limit(1);
+  return rows.length > 0;
+}
+
+export async function toggleSaved(saverKey: string, postId: string): Promise<boolean> {
+  const database = await readyDb();
+  if (await isSaved(saverKey, postId)) {
+    await database
+      .delete(savedPosts)
+      .where(and(eq(savedPosts.saverKey, saverKey), eq(savedPosts.postId, postId)));
+    return false;
+  }
+  await database.insert(savedPosts).values({ saverKey, postId }).onConflictDoNothing();
+  return true;
+}
+
+export interface SavedEntry {
+  slug: string;
+  title: string;
+  savedAt: number;
+}
+
+export async function getSaved(saverKey: string): Promise<SavedEntry[]> {
+  const database = await readyDb();
+  return database
+    .select({ slug: posts.slug, title: posts.title, savedAt: savedPosts.createdAt })
+    .from(savedPosts)
+    .innerJoin(posts, eq(savedPosts.postId, posts.id))
+    .where(eq(savedPosts.saverKey, saverKey))
+    .orderBy(desc(savedPosts.createdAt))
+    .limit(50);
+}
+
+export async function getFollowedAuthors(
+  followerKey: string,
+): Promise<Array<{ handle: string; displayName: string }>> {
+  const database = await readyDb();
+  const { users } = await import('../db/schema');
+  return database
+    .select({ handle: users.handle, displayName: users.displayName })
+    .from(follows)
+    .innerJoin(users, eq(follows.authorId, users.id))
+    .where(eq(follows.followerKey, followerKey))
+    .orderBy(desc(follows.createdAt))
+    .limit(50);
+}
+
+/** Claiming keeps everything: notes, reactions, follows and saves move to the account. */
+export async function claimAnonMemory(anonId: string, authorId: string): Promise<void> {
+  const database = await readyDb();
+  const from = `a:${anonId}`;
+  const to = `u:${authorId}`;
+  // Reactions merge; a claimed account keeps both histories.
+  await database.run(sql`UPDATE OR IGNORE annotation_reactions SET voter_key = ${to} WHERE voter_key = ${from}`);
+  await database.run(sql`UPDATE OR IGNORE follows SET follower_key = ${to} WHERE follower_key = ${from}`);
+  await database.run(sql`UPDATE OR IGNORE saved_posts SET saver_key = ${to} WHERE saver_key = ${from}`);
 }

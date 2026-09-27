@@ -139,6 +139,44 @@ const behind = memory.entries.filter((e) => e.behind);
         </section>
       )}
 
+      {(memory.saved.length > 0 || memory.followed.length > 0) && (
+        <section aria-labelledby="kept-heading">
+          <h2 id="kept-heading" class="text-xl">Kept</h2>
+          {memory.saved.length > 0 && (
+            <>
+              <p class="meta mt-4">Saved for later</p>
+              <ol class="mt-2 space-y-3">
+                {memory.saved.map((s) => (
+                  <li class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-rule pb-3 last:border-b-0">
+                    <a href={`/w/${s.slug}`} class="no-underline hover:text-accent">
+                      {s.title}
+                    </a>
+                    <span class="meta">kept {ago(s.savedAt)}</span>
+                  </li>
+                ))}
+              </ol>
+            </>
+          )}
+          {memory.followed.length > 0 && (
+            <>
+              <p class="meta mt-6">Authors you follow</p>
+              <ul class="mt-2 flex flex-wrap gap-2">
+                {memory.followed.map((a) => (
+                  <li>
+                    <a
+                      href={`/a/${a.handle}`}
+                      class="meta no-underline border border-rule px-2 py-1 hover:border-rule-strong hover:text-ink"
+                    >
+                      @{a.handle}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+      )}
+
       <p class="border-t border-rule pt-6 text-[0.9375rem] text-ink-2">
         <a href="/privacy#forget" class="text-ink no-underline hover:text-accent">
           Forget my reading history →
