@@ -4,6 +4,8 @@ import StatusBadge from '../components/StatusBadge.astro';
 import { resolvePrefs, ANON_COOKIE } from '../lib/prefs';
 import { getIdentity } from '../lib/repo/auth';
 import { getOpenAsks, listCaptures, myPostHealth } from '../lib/repo/studio';
+import { getPostById } from '../lib/repo/posts';
+import { lintCitations, type LintReport } from '../lib/lint';
 import { getReportedNotes } from '../lib/repo/annotations';
 import { ago, plural } from '../lib/format';
 
@@ -26,6 +28,16 @@ const studioError = Astro.url.searchParams.get('studioError');
 const captures = identity.userId ? await listCaptures(identity.userId, 'inbox') : [];
 const seeds = identity.userId ? await listCaptures(identity.userId, 'seed') : [];
 const health = identity.userId ? await myPostHealth(identity.userId) : [];
+
+/* Citation lint over each post's current body. Advisory by construction: a
+   number with no source is a question, not a verdict, and the page says so. */
+const lintByPost = new Map<string, LintReport>();
+if (identity.userId) {
+  for (const post of health) {
+    const full = await getPostById(post.id);
+    if (full) lintByPost.set(post.id, lintCitations(full.blocks));
+  }
+}
 
 const openAsksByPost = new Map<string, Awaited<ReturnType<typeof getOpenAsks>>>();
 if (identity.userId) {
@@ -212,6 +224,28 @@ const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
                         where readers get to →
                       </a>
                     </p>
+                  )}
+                  {lintByPost.get(post.id)!.findings.length > 0 && (
+                    <details class="note-disclosure mt-2">
+                      <summary class="meta cursor-pointer text-ink-3 hover:text-ink">
+                        {lintByPost.get(post.id)!.findings.length} claim
+                        {lintByPost.get(post.id)!.findings.length === 1 ? '' : 's'} without a
+                        source
+                      </summary>
+                      <ul class="mt-2 space-y-2">
+                        {lintByPost.get(post.id)!.findings.map((f) => (
+                          <li class="border-l-2 border-ochre pl-2">
+                            <p class="text-[0.875rem] leading-relaxed text-ink-2">{f.quote}</p>
+                            <p class="meta mt-1">{f.detail}</p>
+                          </li>
+                        ))}
+                      </ul>
+                      <p class="meta mt-2">
+                        {lintByPost.get(post.id)!.claimsChecked} claims checked ·
+                        {lintByPost.get(post.id)!.citationsFound} with sources. Advisory, not a
+                        fact-check.
+                      </p>
+                    </details>
                   )}
                   {(openAsksByPost.get(post.id) ?? []).length > 0 && (
                     <ul class="mt-3 space-y-2 border-t border-rule pt-3">

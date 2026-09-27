@@ -16,6 +16,7 @@ import {
 import { getIdentity } from '../../lib/repo/auth';
 import { countParticipants, listAnnotations, myReactions, voterKeyFor } from '../../lib/repo/annotations';
 import { isSaved, memoryKeyFor } from '../../lib/repo/reader';
+import { getMyHighlights } from '../../lib/repo/highlights';
 import { askPost } from '../../lib/repo/ask';
 import { blockToPlainText } from '../../lib/blocks';
 import { resolvePrefs, DEPTH_COOKIE, ensureAnonId, type Depth } from '../../lib/prefs';
@@ -142,6 +143,13 @@ const myReactionSet = await myReactions(
 );
 const mineReactions = [...myReactionSet];
 const isSavedNow = await isSaved(memoryKeyFor(identity.userId, anonId), post.id);
+
+/** This reader's own highlights on this post, if any — the only place a
+ *  highlight is ever shown to the person who made it. */
+const myHighlights = (await getMyHighlights(anonId, identity.userId)).filter(
+  (h) => h.postSlug === post.slug,
+);
+const myHighlightCount = myHighlights.length;
 
 /** Where a form post should return to: this page, query string intact, so the
  *  reader lands back on the revision or sort they were reading. */
@@ -516,6 +524,32 @@ const jsonLd = [
             </div>
           )}
         </section>
+
+        {myHighlightCount > 0 && (
+          <section aria-labelledby="hl-heading" class="border-t border-rule pt-6">
+            <h2 id="hl-heading" class="text-xl">
+              Your highlights{' '}
+              <span class="meta">· {plural(myHighlightCount, 'span')}</span>
+            </h2>
+            <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+              Private to you. Writers see which spans readers marked, never who
+              marked them or that you did.
+            </p>
+            <ol class="mt-4 space-y-4">
+              {myHighlights.map((h) => (
+                <li class="border-l-2 border-accent pl-3">
+                  <p class="text-[0.9375rem] leading-relaxed text-ink-2">{h.text}</p>
+                  <p class="meta mt-1.5">
+                    <a href={`/w/${h.postSlug}`} class="no-underline hover:text-ink">
+                      {h.postTitle}
+                    </a>{' '}
+                    · {ago(h.createdAt)}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
       </div>
     </div>
 
