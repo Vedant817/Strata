@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import { resolvePrefs, ANON_COOKIE } from '../lib/prefs';
+import { isMailConfigured } from '../lib/mail';
 import { getIdentity, getPendingClaim } from '../lib/repo/auth';
 import { pruneClaims } from '../lib/repo/auth';
 
@@ -11,7 +12,8 @@ void pruneClaims();
 const pending = await getPendingClaim(anonId);
 
 const claimToken = Astro.url.searchParams.get('claim');
-const mailConfigured = Boolean(process.env.SMTP_HOST || process.env.RESEND_API_KEY);
+const mailedHandle = Astro.url.searchParams.get('mailed') ?? '';
+const mailConfigured = isMailConfigured();
 
 /* The token in the URL is the one just requested, so it wins. Falling back to the
    pending claim means the link also survives a reload or a later visit, which
@@ -138,15 +140,25 @@ const claimPath = activeToken ? `/claim/${activeToken}` : null;
               </p>
               {mailConfigured ? (
                 <p class="mt-2 text-[0.9375rem]">
-                  The link is in the email sent to you. It expires, and asking for a new one
-                  replaces it.
+                  {mailedHandle ? (
+                    <>
+                      The link is on its way to your inbox for{' '}
+                      <strong class="font-medium">@{mailedHandle}</strong>. It expires in twenty
+                      minutes, and asking for a new one replaces it.
+                    </>
+                  ) : (
+                    <>
+                      The link is in the email sent to you. It expires, and asking for a new one
+                      replaces it.
+                    </>
+                  )}
                 </p>
               ) : (
                 <>
                   <p class="mt-2 text-[0.9375rem]">
-                    <strong>No mailer is configured, so the link is here instead of in an inbox.</strong>{' '}
-                    That is the one piece of this flow that is not real yet, and it has to be before
-                    anyone public signs up.
+                    <strong>No mailer is configured on this site, so the link is here instead of in an inbox.</strong>{' '}
+                    Set <code class="border border-rule bg-sunken px-1">RESEND_API_KEY</code> and it
+                    travels by email like a real signup.
                   </p>
                   {claimPath && (
                     <p class="mt-2">

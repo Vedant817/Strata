@@ -1,0 +1,95 @@
+---
+import Base from '../layouts/Base.astro';
+import { resolvePrefs, ANON_COOKIE } from '../lib/prefs';
+import { getIdentity } from '../lib/repo/auth';
+import { getThesisMetrics, judgeThesis } from '../lib/repo/thesis';
+
+/**
+ * Whether the thesis is working, in public.
+ *
+ * §10.8 sets four kill criteria and insists they are written down before the
+ * data is flattering. This page is those criteria with live numbers beside
+ * them — including "too few reads to judge", which is the honest state of a
+ * young publication and not a failure to hide. A metrics page that cannot show
+ * failing is decoration; every row here can.
+ */
+
+const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+const prefs = resolvePrefs(Astro.cookies as never, anonId);
+void getIdentity(Astro.cookies);
+
+const metrics = await getThesisMetrics();
+const verdicts = judgeThesis(metrics);
+
+const VERDICT_STYLE = {
+  passing: 'border-pine text-pine',
+  failing: 'border-danger text-danger',
+  unknown: 'border-rule-strong text-ink-3',
+} as const;
+
+const VERDICT_LABEL = {
+  passing: 'holding',
+  failing: 'failing',
+  unknown: 'too early',
+} as const;
+---
+
+<Base
+  title="Is this working?"
+  description="The four kill criteria for Strata, with live numbers. A post is a durable surface; these numbers test whether it behaves like one."
+  prefs={prefs}
+>
+  <header class="shell border-b border-rule py-12">
+    <div class="max-w-2xl">
+      <p class="meta">The thesis test</p>
+      <h1 class="mt-3 text-3xl">Is this working?</h1>
+      <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">
+        The prediction is falsifiable: a post published a year ago should still
+        be receiving a meaningful share of its reads. If it is not, the correct
+        response is to stop and rebuild — not to add features. These are the
+        four criteria, with today's numbers beside them.
+      </p>
+      <p class="meta mt-4">
+        {metrics.posts} posts · {metrics.reads} reads · {metrics.readers} readers ·{' '}
+        {metrics.annotationCount} notes
+      </p>
+    </div>
+  </header>
+
+  <div class="shell py-12">
+    <div class="max-w-2xl">
+      <ol class="space-y-6">
+        {verdicts.map((v, i) => (
+          <li class={`border border-rule p-4`}>
+            <div class="flex flex-wrap items-baseline justify-between gap-2">
+              <p class="meta">
+                Criterion {i + 1}
+              </p>
+              <p class={`meta border px-2 py-0.5 ${VERDICT_STYLE[v.verdict]}`}>
+                {VERDICT_LABEL[v.verdict]}
+              </p>
+            </div>
+            <h2 class="mt-2 text-xl">{v.criterion}</h2>
+            <p class="mt-1 text-[0.9375rem] text-ink-2">Target: {v.target}.</p>
+            <p class="mt-1 font-mono text-[0.9375rem] tabular-nums">{v.value}</p>
+          </li>
+        ))}
+      </ol>
+
+      {!metrics.enoughData && (
+        <p class="mt-8 border-l-2 border-rule-strong pl-4 text-[0.9375rem] leading-relaxed text-ink-2">
+          Every criterion reads “too early” because rates built on fewer than
+          twenty reads are noise. That threshold is the same cohort rule the
+          writer analytics obey: never judge a pattern you cannot see clearly.
+        </p>
+      )}
+
+      <p class="mt-8 border-t border-rule pt-6 text-[0.9375rem] text-ink-2">
+        Reads here mean <em>read receipts</em> — one per reader per post per
+        version — not block impressions, which would flatter every rate by an
+        order of magnitude. If criterion 1 or 2 fails at month 6, the plan says
+        to stop. It is written here so the decision is not made by sunk cost.
+      </p>
+    </div>
+  </div>
+</Base>

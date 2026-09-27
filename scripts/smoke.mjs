@@ -30,6 +30,7 @@ const OK = [
   '/constellations',
   '/search',
   '/search?q=caching',
+  '/thesis',
   '/rss.xml',
   '/robots.txt',
   '/w/cache-invalidation-is-a-distributed-problem',

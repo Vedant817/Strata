@@ -5,8 +5,11 @@
 >
 > **One-liner:** Posts that keep up with reality. Read at your depth. Leave notes in the margins.
 >
-> Status: plan, pre-build. Repo is currently an untouched Astro 4 starter (4 commits, 3 pages, no
-> content layer, no adapter, no DB). Everything below is greenfield.
+> Status: in build. The reading spine, marginalia, discovery layer, identity,
+> search, CI and performance budget are implemented and verified in a browser;
+> Ask, Studio, import and launch flows are being built in that order. Anything
+> below marked "deferred" is still deferred. Anything marked v1 that has no
+> code yet is listed as remaining, not redescribed.
 
 ---
 
