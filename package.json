@@ -31,6 +31,7 @@
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/ibm-plex-serif": "^5.3.0",
     "@libsql/client": "^0.18.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^7.3.5",
     "diff": "^9.0.0",
@@ -38,6 +39,7 @@
     "nanoid": "^6.0.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "satori": "^0.33.5",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.4.3",
     "zod": "^4.6.5"

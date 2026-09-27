@@ -166,7 +166,7 @@ const jsonLd = [
 ];
 ---
 
-<Base title={title} description={description} ogType="article" prefs={prefs} jsonLd={jsonLd}>
+<Base title={title} description={description} ogType="article" ogImage={`/og/${post.slug}.png`} prefs={prefs} jsonLd={jsonLd}>
   <article data-depth-host data-depth={depth} data-post-id={post.id} data-version={view.current.versionNumber}>
     <header class="shell border-b border-rule pt-10 pb-8">
       <div class="article-body">

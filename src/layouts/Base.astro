@@ -13,6 +13,10 @@ interface Props {
   prefs?: ReaderPrefs;
   /** Extra JSON-LD graph nodes, serialised by the caller. */
   jsonLd?: unknown[];
+  /** Absolute or root-relative URL of the share image. When set, the card
+   *  actually exists — `summary_large_image` without an image is a blank card,
+   *  which is what every post shared until this prop existed. */
+  ogImage?: string;
   bodyClass?: string;
 }
 
@@ -23,6 +27,7 @@ const {
   ogType = 'website',
   noindex = false,
   jsonLd = [],
+  ogImage,
   bodyClass = '',
 } = Astro.props;
 
@@ -62,7 +67,20 @@ const graph = jsonLd.length
     <meta property="og:title" content={title ?? 'Strata'} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonicalUrl} />
-    <meta name="twitter:card" content="summary_large_image" />
+    {
+      ogImage ? (
+        <>
+          <meta property="og:image" content={new URL(ogImage, site).href} />
+          <meta property="og:image:width" content="1200" />
+          <meta property="og:image:height" content="630" />
+          <meta property="og:image:alt" content={title ?? 'Strata'} />
+          <meta name="twitter:card" content="summary_large_image" />
+          <meta name="twitter:image" content={new URL(ogImage, site).href} />
+        </>
+      ) : (
+        <meta name="twitter:card" content="summary" />
+      )
+    }
     <meta name="twitter:title" content={title ?? 'Strata'} />
     <meta name="twitter:description" content={description} />
 
