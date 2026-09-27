@@ -15,6 +15,13 @@
       "when": 1790495384501,
       "tag": "0001_anonymous_annotation_reactions",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790508955492,
+      "tag": "0002_post_search_index",
+      "breakpoints": true
     }
   ]
 }

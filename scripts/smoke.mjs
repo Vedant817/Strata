@@ -28,6 +28,8 @@ const OK = [
   '/privacy',
   '/write',
   '/constellations',
+  '/search',
+  '/search?q=caching',
   '/rss.xml',
   '/robots.txt',
   '/w/cache-invalidation-is-a-distributed-problem',

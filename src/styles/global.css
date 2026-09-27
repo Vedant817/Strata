@@ -468,6 +468,16 @@
   border-inline-start: 2px solid var(--accent);
 }
 
+/* Search hits mark the matched span. One flat tint, readable in both themes,
+   and never a gradient wash — it has to read as ink on paper, not as a
+   highlighter dragged across the screen. */
+mark {
+  background: var(--accent-soft);
+  color: inherit;
+  border-bottom: 1px solid var(--rule-strong);
+  border-radius: 1px;
+  padding-inline: 1px;
+}
 /* A reply sits inside its parent's rail entry, so it reads as a continuation
    rather than a second thing arguing with the same sentence. */
 .note-reply {

@@ -1,0 +1,125 @@
+---
+import Base from '../layouts/Base.astro';
+import StatusBadge from '../components/StatusBadge.astro';
+import { resolvePrefs, ANON_COOKIE } from '../lib/prefs';
+import { getIdentity } from '../lib/repo/auth';
+import { countPosts } from '../lib/repo/posts';
+import { searchPosts } from '../lib/repo/search';
+
+/**
+ * Search, server-rendered.
+ *
+ * There is no JavaScript on this page at all: a form, a GET, and ranked
+ * results with the matched span marked. That is the whole feature, and making
+ * it an island would only have added a loading state to something the server
+ * already knows. FTS5 with porter stemming, so "caching" finds "cache".
+ * Only public, published posts are indexed, so drafts can never leak through
+ * a query — the filter lives in both the index build and the query.
+ */
+
+const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+const prefs = resolvePrefs(Astro.cookies as never, anonId);
+void getIdentity(Astro.cookies);
+
+const raw = (Astro.url.searchParams.get('q') ?? '').trim();
+const query = raw.slice(0, 200);
+const searched = query.length > 0;
+const hits = searched ? await searchPosts(query) : [];
+const indexed = await countPosts();
+---
+
+<Base
+  title={searched ? `“${query}” · Search` : 'Search'}
+  description="Search every post on Strata — titles, deks and body text, ranked by relevance."
+  prefs={prefs}
+>
+  <header class="shell border-b border-rule py-12">
+    <div class="max-w-2xl">
+      <p class="meta">Search</p>
+      <h1 class="mt-3 text-3xl">Search the canon</h1>
+      <form method="get" action="/search" class="mt-6 flex gap-2" role="search">
+        <label class="sr-only" for="search-q">
+          Search posts
+        </label>
+        <input
+          id="search-q"
+          name="q"
+          type="search"
+          value={query}
+          required
+          minlength={2}
+          maxlength={200}
+          autocomplete="off"
+          placeholder="retrieval, p99, staging…"
+          class="min-w-0 flex-1 border border-rule bg-paper px-3 py-2 text-[0.9375rem] focus:border-accent focus:outline-none"
+        />
+        <button
+          type="submit"
+          class="shrink-0 border border-ink bg-ink px-4 py-2 text-[0.9375rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+        >
+          Search
+        </button>
+      </form>
+      <p class="meta mt-3">
+        {indexed} {indexed === 1 ? 'post' : 'posts'} indexed · titles, deks and body text
+      </p>
+    </div>
+  </header>
+
+  <div class="shell py-12">
+    <div class="max-w-2xl">
+      {
+        !searched && (
+          <p class="text-[1.0625rem] leading-relaxed text-ink-2">
+            Type above. Results are ranked by relevance, and the sentence your
+            words appear in is shown with each one — so you can tell before
+            clicking whether the post argues what you hoped.
+          </p>
+        )
+      }
+
+      {
+        searched && hits.length === 0 && (
+          <div>
+            <p class="text-[1.0625rem] leading-relaxed text-ink">
+              Nothing on “{query}”.
+            </p>
+            <p class="mt-3 text-[0.9375rem] leading-relaxed text-ink-2">
+              The canon is small and the spelling is literal-minded: try a
+              shorter word, a synonym, or{' '}
+              <a href="/writing" class="text-ink no-underline hover:text-accent">
+                browse everything →
+              </a>
+            </p>
+          </div>
+        )
+      }
+
+      {
+        searched && hits.length > 0 && (
+          <>
+            <p class="meta mb-6">
+              {hits.length} {hits.length === 1 ? 'result' : 'results'} for “{query}”
+            </p>
+            <ol class="space-y-8">
+              {hits.map((hit) => (
+                <li class="border-b border-rule pb-8 last:border-b-0">
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <StatusBadge status={hit.status} />
+                  </div>
+                  <h2 class="mt-2 text-xl">
+                    <a href={`/w/${hit.slug}`} class="no-underline hover:text-accent">
+                      {hit.title}
+                    </a>
+                  </h2>
+                  {hit.dek && <p class="mt-1.5 text-[0.9375rem] leading-relaxed text-ink-2">{hit.dek}</p>}
+                  <p class="search-snippet mt-2 border-l-2 border-rule-strong pl-3 text-[0.9375rem] leading-relaxed text-ink-2" set:html={hit.snippet} />
+                </li>
+              ))}
+            </ol>
+          </>
+        )
+      }
+    </div>
+  </div>
+</Base>

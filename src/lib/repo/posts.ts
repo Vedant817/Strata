@@ -29,6 +29,7 @@ import {
 } from '../blocks';
 import { diffBlocks, type DiffEntry } from '../diff';
 import { nanoid } from '../ids';
+import { rebuildSearchIndex } from './search';
 
 export type PostWithMeta = typeof posts.$inferSelect & {
   authorHandle: string;
@@ -317,6 +318,10 @@ export async function createPost(input: CreatePostInput) {
       .onConflictDoNothing();
   }
 
+  // The search index is a projection of the current version, so it refreshes
+  // on every publish rather than on a timer that can serve stale results.
+  await rebuildSearchIndex();
+
   return { postId, versionId };
 }
 
@@ -364,6 +369,8 @@ export async function publishRevision(input: RevisionInput) {
       publishedAt: firstPublish ? now : existing?.publishedAt,
     })
     .where(eq(posts.id, input.postId));
+
+  await rebuildSearchIndex();
 
   return { versionId, versionNumber: nextNumber };
 }

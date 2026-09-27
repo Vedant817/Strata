@@ -23,6 +23,7 @@ import {
   users,
 } from '../src/lib/db/schema';
 import { nanoid } from '../src/lib/ids';
+import { rebuildSearchIndex } from '../src/lib/repo/search';
 import { assertNoAnchorMisses } from '../src/seed/build';
 import { blockToPlainText, serializeBody, type Block } from '../src/lib/blocks';
 import {
@@ -265,6 +266,9 @@ async function main() {
     console.warn('\nwarning: posts without a full depth stack:');
     for (const t of thin) console.warn(`  · ${t}`);
   }
+
+  const indexed = await rebuildSearchIndex();
+  console.log(`search index: ${indexed} posts`);
 
   process.exit(0);
 }
