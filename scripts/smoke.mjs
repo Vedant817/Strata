@@ -34,6 +34,7 @@ const OK = [
   '/reader',
   '/studio',
   '/og/cache-invalidation-is-a-distributed-problem.png',
+  '/og/cache-invalidation-is-a-distributed-problem-diff.png',
   '/rss.xml',
   '/robots.txt',
   '/w/cache-invalidation-is-a-distributed-problem',

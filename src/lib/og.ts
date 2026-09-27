@@ -61,6 +61,8 @@ export interface ShareCard {
   kickerColor?: string;
   footerLeft: string;
   footerRight: string;
+  /** Optional changed-line preview: the card's reason to exist. */
+  changes?: Array<{ kind: 'added' | 'removed' | 'changed'; text: string }>;
 }
 
 const PAPER = '#faf9f5';
@@ -107,13 +109,13 @@ export async function renderShareCard(card: ShareCard): Promise<Uint8Array> {
     el(
       'div',
       {
-        fontSize: 74,
-        lineHeight: 1.12,
+        fontSize: card.changes && card.changes.length > 0 ? 64 : 74,
+        lineHeight: 1.1,
         fontWeight: 500,
         color: INK,
-        marginTop: 36,
+        marginTop: 32,
         display: '-webkit-box',
-        WebkitLineClamp: 3,
+        WebkitLineClamp: card.changes && card.changes.length > 0 ? 2 : 3,
         WebkitBoxOrient: 'vertical',
         overflow: 'hidden',
       },
@@ -136,7 +138,39 @@ export async function renderShareCard(card: ShareCard): Promise<Uint8Array> {
         )
       : null,
     el('div', { flex: 1 }),
-    el('div', { height: 5, background: ACCENT, width: 120, marginBottom: 22 }),
+    ...(card.changes && card.changes.length > 0
+      ? [
+          el(
+            'div',
+            { display: 'flex', flexDirection: 'column', gap: 12, marginTop: 28 },
+            ...card.changes.slice(0, 3).map((c) =>
+              el(
+                'div',
+                { display: 'flex', gap: 16, alignItems: 'flex-start' },
+                el('div', {
+                  width: 4,
+                  alignSelf: 'stretch',
+                  background: c.kind === 'added' ? '#6b7a5a' : c.kind === 'removed' ? '#837d72' : ACCENT,
+                }),
+                el(
+                  'div',
+                  {
+                    fontSize: 27,
+                    lineHeight: 1.35,
+                    color: INK_2,
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                  },
+                  c.text,
+                ),
+              ),
+            ),
+          ),
+        ]
+      : []),
+    el('div', { height: 5, background: ACCENT, width: 120, marginTop: 28, marginBottom: 22 }),
     el(
       'div',
       { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
