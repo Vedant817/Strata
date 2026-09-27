@@ -65,15 +65,19 @@ export async function searchPosts(raw: string, limit = 20): Promise<SearchHit[]>
 /**
  * Rebuild the index from the current version of every visible post.
  *
- * Called after seeding and after any publish, because the indexed body is a
- * projection of typed-block JSON into plain text and only application code
- * knows how to make that projection. Returns the number of posts indexed so
- * the caller can say so honestly instead of assuming it worked.
+ * Fills both `post_fts` (which post) and `block_fts` (which sentence — Ask
+ * needs block scope, and a post-level index cannot promise that a passage
+ * came from *this* post). Called after seeding and after any publish, because
+ * the indexed body is a projection of typed-block JSON into plain text and
+ * only application code knows how to make that projection. Returns the number
+ * of posts indexed so the caller can say so honestly instead of assuming it
+ * worked.
  */
 export async function rebuildSearchIndex(): Promise<number> {
   const database = await readyDb();
   const rows = await database
     .select({
+      postId: posts.id,
       slug: posts.slug,
       title: posts.title,
       dek: posts.dek,
@@ -84,11 +88,22 @@ export async function rebuildSearchIndex(): Promise<number> {
     .where(eq(posts.visibility, 'public'));
 
   await database.run(sql`DELETE FROM post_fts`);
+  await database.run(sql`DELETE FROM block_fts`);
   for (const row of rows) {
-    const body = parseBody(row.body).map((b) => blockToPlainText(b)).join('\n\n');
+    const parsed = parseBody(row.body);
+    const body = parsed.map((b) => blockToPlainText(b)).join('\n\n');
     await database.run(
       sql`INSERT INTO post_fts(title, dek, body, slug) VALUES (${row.title}, ${row.dek}, ${body}, ${row.slug})`,
     );
+    for (const block of parsed) {
+      const text = blockToPlainText(block).trim();
+      // Headings index well and quote well; code and figures do neither, and
+      // a code dump as an "answer" is a failure mode, not a feature.
+      if (!text || block.type === 'code' || block.type === 'figure') continue;
+      await database.run(
+        sql`INSERT INTO block_fts(text, block_id, post_id) VALUES (${text}, ${block.id}, ${row.postId})`,
+      );
+    }
   }
   return rows.length;
 }

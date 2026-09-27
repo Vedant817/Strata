@@ -88,13 +88,14 @@ const segHtml = (segments: Array<{ type: string; html?: string; text: string }>)
         return renderInline(source);
       };
 
-      return (
-        <div
-          data-block-id={id}
-          data-layer={block.layer}
-          data-block-type={block.type}
-          data-change={status}
-          class:list={[
+        return (
+          <div
+            id={`block-${id}`}
+            data-block-id={id}
+            data-layer={block.layer}
+            data-block-type={block.type}
+            data-change={status}
+            class:list={[
             'block-with-notes',
             changed && 'diff-block',
             status === 'removed' && 'opacity-70',
