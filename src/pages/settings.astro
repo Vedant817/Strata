@@ -1,0 +1,137 @@
+---
+import Base from '../layouts/Base.astro';
+import { getIdentity } from '../lib/repo/auth';
+import { getProfile } from '../lib/repo/readerProfile';
+import {
+  ANON_COOKIE,
+  DENSITIES,
+  DENSITY_COOKIE,
+  DEPTHS,
+  DEPTH_COOKIE,
+  DEPTH_HINT,
+  DEPTH_LABEL,
+  resolvePrefs,
+  type Depth,
+  type Density,
+} from '../lib/prefs';
+
+const identity = await getIdentity(Astro.cookies);
+const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
+const cookiePrefs = resolvePrefs(Astro.cookies as never, anonId);
+
+// A profile only fills a gap. If this device already has an explicit depth
+// cookie, that local choice wins — otherwise opening the site on a phone would
+// silently override the setting the reader just made there. Read the cookies
+// directly (Astro.cookies has .get(), not string indexing) rather than through
+// resolvePrefs, which is fed an AstroCookies and cannot see the values.
+const localDepth = Astro.cookies.get(DEPTH_COOKIE)?.value as Depth | undefined;
+const localDensity = Astro.cookies.get(DENSITY_COOKIE)?.value as Density | undefined;
+const profile = identity.userId ? await getProfile(identity.userId) : null;
+
+const depth = localDepth ?? profile?.depth ?? 'understand';
+const density = localDensity ?? profile?.density ?? 'comfortable';
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+const error = Astro.url.searchParams.get('settingsError');
+---
+
+<Base title="Reading settings" description="How Strata reads to you." prefs={cookiePrefs}>
+  <div class="shell py-16">
+    <div class="max-w-xl">
+      <p class="meta">Settings</p>
+      <h1 class="mt-3 text-3xl">Reading settings</h1>
+      <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">
+        These change how every post here renders. They follow you to a new
+        device once you have a handle; without one they stay in this browser.
+      </p>
+
+      {
+        saved && (
+          <p class="mt-6 border-l-2 border-pine pl-3 text-[0.9375rem] text-pine" role="status">
+            Saved. This device and your account now agree.
+          </p>
+        )
+      }
+      {error && (
+        <p class="mt-6 border border-danger px-3 py-2 text-[0.9375rem] text-danger" role="alert">
+          {error}
+        </p>
+      )}
+
+      {
+        identity.userId ? (
+          <form method="post" action="/api/settings" class="mt-8 space-y-8">
+            <input type="hidden" name="returnTo" value="/settings" />
+
+            <fieldset>
+              <legend class="text-[1.0625rem] font-medium">How deep should I read?</legend>
+              <p class="mt-1 text-[0.9375rem] leading-relaxed text-ink-2">
+                The same on every post. You can still change depth per post from
+                the dial on the article.
+              </p>
+              <div class="mt-3 space-y-2">
+                {DEPTHS.map((d) => (
+                  <label class="flex cursor-pointer items-start gap-3 border border-rule p-3">
+                    <input
+                      type="radio"
+                      name="depth"
+                      value={d}
+                      checked={depth === d}
+                      class="mt-1 accent-[var(--accent)]"
+                    />
+                    <span>
+                      <span class="block font-medium">{DEPTH_LABEL[d]}</span>
+                      <span class="mt-0.5 block text-[0.875rem] text-ink-2">{DEPTH_HINT[d]}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend class="text-[1.0625rem] font-medium">How much space?</legend>
+              <p class="mt-1 text-[0.9375rem] leading-relaxed text-ink-2">
+                Line height and measure. Compact fits more of a long argument on
+                a screen.
+              </p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                {DENSITIES.map((d) => (
+                  <label class="flex cursor-pointer items-center gap-2 border border-rule px-3 py-2">
+                    <input
+                      type="radio"
+                      name="density"
+                      value={d}
+                      checked={density === d}
+                      class="accent-[var(--accent)]"
+                    />
+                    <span class="text-[0.9375rem] capitalize">{d}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <button
+              type="submit"
+              class="border border-ink bg-ink px-4 py-2 text-[0.9375rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+            >
+              Save settings
+            </button>
+          </form>
+        ) : (
+          <div class="mt-8 border border-rule p-4">
+            <p class="text-[0.9375rem] leading-relaxed text-ink-2">
+              You are reading anonymously, which is fine — your settings live in
+              this browser. Claim a handle and they will follow you to the next
+              device.
+            </p>
+            <p class="mt-3">
+              <a href="/write" class="text-[0.9375rem] text-ink no-underline hover:text-accent">
+                Set your depth once →
+              </a>
+            </p>
+          </div>
+        )
+      }
+    </div>
+  </div>
+</Base>

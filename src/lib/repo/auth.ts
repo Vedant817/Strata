@@ -14,6 +14,7 @@
 import { and, desc, eq, gt, isNull, lt, or } from 'drizzle-orm';
 import type { AstroCookies } from 'astro';
 import { readyDb } from '../db';
+import { DEPTH_COOKIE, DENSITY_COOKIE, type Depth, type Density } from '../prefs';
 import { handleClaims, sessions, users } from '../db/schema';
 import { nanoid } from '../ids';
 import { claimAnonNotes } from './annotations';
@@ -211,6 +212,17 @@ export async function redeemHandleClaim(
     .where(eq(handleClaims.id, claim.id));
 
   await createSession(userId, cookies);
+
+  // Carry the reader's anonymous preferences into their new profile, so the
+  // depth they already chose follows them to the next device instead of
+  // resetting to the default the moment they claim a handle.
+  const depth = cookies.get(DEPTH_COOKIE)?.value as Depth | undefined;
+  const density = cookies.get(DENSITY_COOKIE)?.value as Density | undefined;
+  if (depth || density) {
+    const { saveProfile } = await import('./readerProfile');
+    await saveProfile(userId, { ...(depth ? { depth } : {}), ...(density ? { density } : {}) });
+  }
+
   return { ok: true, handle: claim.handle, notesClaimed };
 }
 
