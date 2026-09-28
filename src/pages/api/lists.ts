@@ -10,6 +10,7 @@ import {
   setListVisibility,
 } from '../../lib/repo/taxonomy';
 import { safeReturnTo } from '../../lib/note-actions';
+import { addCollaborator, removeCollaborator } from '../../lib/repo/collaborators';
 
 /**
  * Reading-list management. Same contract as every other mutation here:
@@ -53,6 +54,19 @@ const schema = z.discriminatedUnion('action', [
     action: z.literal('remove'),
     listId: z.string().min(1),
     postSlug: z.string().min(1).max(120),
+    returnTo: z.string().optional(),
+  }),
+  z.object({
+    action: z.literal('add-collaborator'),
+    listId: z.string().min(1),
+    handle: z.string().trim().min(1).max(60),
+    role: z.enum(['editor', 'viewer']).default('viewer'),
+    returnTo: z.string().optional(),
+  }),
+  z.object({
+    action: z.literal('remove-collaborator'),
+    listId: z.string().min(1),
+    handle: z.string().trim().min(1).max(60),
     returnTo: z.string().optional(),
   }),
 ]);
@@ -113,7 +127,17 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url }) => {
     }
     case 'remove': {
       const ok = await removeListItem(input.listId, identity.userId, input.postSlug);
-      if (!ok) return fail('That list is not yours.');
+      if (!ok) return fail('You cannot edit that list.');
+      return redirect(back, 303);
+    }
+    case 'add-collaborator': {
+      const result = await addCollaborator(input.listId, identity.userId, input.handle, input.role);
+      if (!result.ok) return fail(result.error);
+      return redirect(back, 303);
+    }
+    case 'remove-collaborator': {
+      const ok = await removeCollaborator(input.listId, identity.userId, input.handle);
+      if (!ok) return fail('That list is not yours, or that is not a collaborator on it.');
       return redirect(back, 303);
     }
   }

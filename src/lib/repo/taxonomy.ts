@@ -6,12 +6,14 @@ import {
   posts,
   readingListItems,
   readingLists,
+  listCollaborators,
   series,
   topics,
   users,
 } from '../db/schema';
 import type { Post } from '../db/schema';
 import { nanoid } from '../ids';
+import { canEdit as canEditList, isListCollaborator } from './collaborators';
 
 const versionCount = sql<number>`(select count(*) from post_versions where post_versions.post_id = ${posts.id})`;
 const annotationTotal = sql<number>`(
@@ -56,8 +58,7 @@ const baseSelect = {
 
 export type PostCard = Awaited<ReturnType<typeof listAll>>[number];
 
-export async function listAll(options: { includeSeedlings?: boolean } = {}) {
-  const database = await readyDb();
+export async function listAll(options: { includeSeedlings?: boolean } = {}) {  const database = await readyDb();
   const statuses = options.includeSeedlings
     ? (['seedling', 'budding', 'evergreen', 'archived'] as const)
     : (['seedling', 'budding', 'evergreen'] as const);
@@ -240,9 +241,13 @@ export async function listReadingLists(): Promise<ListWithItems[]> {
     .limit(1);
   if (!row) return null;
 
+  const collaborator = viewerUserId
+    ? await isListCollaborator(row.id, viewerUserId)
+    : false;
   const allowed =
     row.isPublic ||
     (viewerUserId !== null && row.ownerId === viewerUserId) ||
+    collaborator ||
     (key !== null && key !== '' && row.shareToken !== null && key === row.shareToken);
   if (!allowed) return null;
 
@@ -506,17 +511,16 @@ export async function revokeListShareToken(listId: string, ownerId: string): Pro
 
 export async function addListItem(
   listId: string,
-  ownerId: string,
+  viewerUserId: string,
   postId: string,
   note: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const database = await readyDb();
-  const [own] = await database
-    .select({ id: readingLists.id })
-    .from(readingLists)
-    .where(and(eq(readingLists.id, listId), eq(readingLists.ownerId, ownerId)))
-    .limit(1);
-  if (!own) return { ok: false, error: 'That list is not yours.' };
+  // An editor — the owner or a named collaborator — may shape the list. A
+  // viewer, and a stranger, may not.
+  if (!(await canEditList(listId, viewerUserId))) {
+    return { ok: false, error: 'You do not have edit access to that list.' };
+  }
   const [post] = await database
     .select({ id: posts.id })
     .from(posts)
@@ -545,16 +549,11 @@ export async function addListItem(
 
 export async function removeListItem(
   listId: string,
-  ownerId: string,
+  viewerUserId: string,
   postSlug: string,
 ): Promise<boolean> {
   const database = await readyDb();
-  const [own] = await database
-    .select({ id: readingLists.id })
-    .from(readingLists)
-    .where(and(eq(readingLists.id, listId), eq(readingLists.ownerId, ownerId)))
-    .limit(1);
-  if (!own) return false;
+  if (!(await canEditList(listId, viewerUserId))) return false;
   const [post] = await database
     .select({ id: posts.id })
     .from(posts)
@@ -578,7 +577,13 @@ export async function getListShareToken(listId: string, ownerId: string): Promis
   return row?.shareToken ?? null;
 }
 
-/** Every list this user owns, including private ones the index never shows. */export async function myReadingLists(ownerId: string) {
+/**
+ * Every list this user can reach from Studio: the ones they own plus the ones
+ * they were added to as a collaborator. Owned lists keep their management
+ * controls; a collaborated list is marked so the UI can show the right thing
+ * and hide the wrong one.
+ */
+export async function myReadingLists(ownerId: string) {
   const database = await readyDb();
   const lists = await database
     .select({
@@ -587,12 +592,29 @@ export async function getListShareToken(listId: string, ownerId: string): Promis
       title: readingLists.title,
       isPublic: readingLists.isPublic,
       hasShareLink: sql<boolean>`${readingLists.shareToken} is not null`,
+      isOwner: sql<boolean>`true`,
     })
     .from(readingLists)
     .where(eq(readingLists.ownerId, ownerId))
     .orderBy(readingLists.createdAt);
+
+  const shared = await database
+    .select({
+      id: readingLists.id,
+      slug: readingLists.slug,
+      title: readingLists.title,
+      isPublic: readingLists.isPublic,
+      hasShareLink: sql<boolean>`${readingLists.shareToken} is not null`,
+      isOwner: sql<boolean>`false`,
+    })
+    .from(listCollaborators)
+    .innerJoin(readingLists, eq(listCollaborators.listId, readingLists.id))
+    .where(eq(listCollaborators.userId, ownerId))
+    .orderBy(readingLists.createdAt);
+
+  const all = [...lists, ...shared];
   const out = [];
-  for (const list of lists) {
+  for (const list of all) {
     const [count] = await database
       .select({ n: sql<number>`count(*)` })
       .from(readingListItems)

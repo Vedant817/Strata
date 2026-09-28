@@ -78,6 +78,13 @@
       "when": 1790605316239,
       "tag": "0010_revision_notified",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1790606917688,
+      "tag": "0011_list_collaborators",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,7 @@
 import Base from '../../layouts/Base.astro';
 import PostRow from '../../components/PostRow.astro';
 import { getAccessibleList } from '../../lib/repo/taxonomy';
+import { canEdit as canEditList, roleFor } from '../../lib/repo/collaborators';
 import { getIdentity } from '../../lib/repo/auth';
 import { resolvePrefs, ANON_COOKIE } from '../../lib/prefs';
 
@@ -18,6 +19,11 @@ const prefs = resolvePrefs(Astro.cookies as never, anonId);
 
 const total = list.items.reduce((sum, i) => sum + (i.post.readingMinutes ?? 0), 0);
 const isOwner = identity.userId !== null && identity.userId === list.ownerId;
+// The owner is always an editor; a named collaborator may be too. `canEdit`
+// decides, so the remove control appears for anyone who may actually use it
+// rather than for everyone who can see the page.
+const canEdit = await canEditList(list.id, identity.userId);
+const viewerRole = identity.userId ? await roleFor(list.id, identity.userId) : null;
 ---
 
 <Base title={list.title} description={list.description} prefs={prefs}>
@@ -28,6 +34,11 @@ const isOwner = identity.userId !== null && identity.userId === list.ownerId;
       {!list.isPublic && (
         <p class="meta mt-2 inline-block border border-ochre px-2 py-0.5 text-ochre">
           Private{list.hasShareLink ? ' · shared by link' : ' · only you'}
+        </p>
+      )}
+      {!isOwner && viewerRole && (
+        <p class="meta mt-2 inline-block border border-rule px-2 py-0.5 text-ink-2">
+          You are a collaborator here ({viewerRole})
         </p>
       )}
       <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">{list.description}</p>
@@ -53,7 +64,7 @@ const isOwner = identity.userId !== null && identity.userId === list.ownerId;
               note={item.note}
               ordinal={i + 1}
             />
-            {isOwner && (
+            {canEdit && (
               <form method="post" action="/api/lists" class="mb-4 ml-1">
                 <input type="hidden" name="action" value="remove" />
                 <input type="hidden" name="listId" value={list.id} />

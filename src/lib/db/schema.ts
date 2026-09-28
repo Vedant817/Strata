@@ -535,6 +535,36 @@ export const revisionSubscriptions = sqliteTable(
   (t) => [uniqueIndex('revision_subscriptions_uq').on(t.postId, t.email)],
 );
 
+/**
+ * Reading-list collaborators, with a role.
+ *
+ * A share link is not collaboration: it grants one undifferentiated capability
+ * to anyone who happens to hold the URL, cannot be revoked per person, and
+ * leaves no record of who shaped the list. A named collaborator can. The role
+ * is deliberately binary — `editor` may add and remove, `viewer` may only read
+ * — because a three-tier permission system on a reading list is a permissions
+ * system nobody asked for.
+ */
+export const listCollaborators = sqliteTable(
+  'list_collaborators',
+  {
+    listId: text('list_id')
+      .notNull()
+      .references(() => readingLists.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: ['editor', 'viewer'] })
+      .notNull()
+      .default('viewer'),
+    addedById: text('added_by_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.listId, t.userId] })],
+);
+
 export const newsletterSubscribers = sqliteTable('newsletter_subscribers', {
   id: text('id').primaryKey(),
   email: text('email').notNull(),

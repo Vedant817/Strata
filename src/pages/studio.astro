@@ -5,6 +5,7 @@ import { resolvePrefs, ANON_COOKIE } from '../lib/prefs';
 import { getIdentity } from '../lib/repo/auth';
 import { getOpenAsks, listCaptures, myPostHealth, synthesizeInbox } from '../lib/repo/studio';
 import { getListShareToken, myReadingLists } from '../lib/repo/taxonomy';
+import { getCollaborators } from '../lib/repo/collaborators';
 import { getPostById, suggestLinks } from '../lib/repo/posts';
 import { lintCitations, type LintReport } from '../lib/lint';
 import { driftScore, featuresOfBlocks, readVoice, type VoiceProfile } from '../lib/repo/voice';
@@ -56,6 +57,13 @@ const digestPreview = identity.userId
     }
   : { items: [], subscribers: 0 };
 const ownedLists = identity.userId ? await myReadingLists(identity.userId) : [];
+// Collaborators for the lists this user owns, so the owner can see and revoke
+// them. Collaborated-on lists show no management UI at all — an editor can add
+// items, but managing *people* is the owner's call alone.
+const collaboratorsByList: Record<string, Awaited<ReturnType<typeof getCollaborators>>> = {};
+for (const list of ownedLists.filter((l) => l.isOwner)) {
+  collaboratorsByList[list.id] = await getCollaborators(list.id);
+}
 
 /* Link suggestions across the writer's own posts. Computed live; each post
    costs one FTS query, which is cheap enough that no caching layer has to be
@@ -681,36 +689,92 @@ const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
                       {list.items} {list.items === 1 ? 'post' : 'posts'} ·{' '}
                       {list.isPublic ? 'public' : 'private'}
                       {!list.isPublic && list.hasShareLink ? ' · shared by link' : ''}
+                      {!list.isOwner ? ' · with you' : ''}
                     </span>
-                    <span class="ml-auto flex items-center gap-2">
-                      <form method="post" action="/api/lists" class="contents">
-                        <input type="hidden" name="action" value="visibility" />
+                    {list.isOwner && (
+                      <span class="ml-auto flex items-center gap-2">
+                        <form method="post" action="/api/lists" class="contents">
+                          <input type="hidden" name="action" value="visibility" />
+                          <input type="hidden" name="listId" value={list.id} />
+                          <input type="hidden" name="isPublic" value={list.isPublic ? 'private' : 'public'} />
+                          <button type="submit" class="meta text-ink-3 hover:text-ink">
+                            Make {list.isPublic ? 'private' : 'public'}
+                          </button>
+                        </form>
+                        {!list.isPublic &&
+                          (list.hasShareLink ? (
+                            <form method="post" action="/api/lists" class="contents">
+                              <input type="hidden" name="action" value="revoke" />
+                              <input type="hidden" name="listId" value={list.id} />
+                              <button type="submit" class="meta text-ink-3 hover:text-danger">
+                                Revoke link
+                              </button>
+                            </form>
+                          ) : (
+                            <form method="post" action="/api/lists" class="contents">
+                              <input type="hidden" name="action" value="share" />
+                              <input type="hidden" name="listId" value={list.id} />
+                              <button type="submit" class="meta text-ink-3 hover:text-ink">
+                                Get share link
+                              </button>
+                            </form>
+                          ))}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Collaborators — a named, revocable alternative to a share
+                      link, and only the owner manages them. */}
+                  {list.isOwner && (
+                    <div class="mt-3 border-t border-rule pt-3">
+                      {(collaboratorsByList[list.id] ?? []).filter((c) => !c.isOwner).length > 0 && (
+                        <ul class="mb-2 space-y-1">
+                          {(collaboratorsByList[list.id] ?? []).filter((c) => !c.isOwner).map((c) => (
+                            <li class="flex items-center gap-2 text-[0.875rem]">
+                              <span>@{c.handle}</span>
+                              <span class="meta">{c.role}</span>
+                              <form method="post" action="/api/lists" class="ml-auto contents">
+                                <input type="hidden" name="action" value="remove-collaborator" />
+                                <input type="hidden" name="listId" value={list.id} />
+                                <input type="hidden" name="handle" value={c.handle} />
+                                <button type="submit" class="meta text-ink-3 hover:text-danger">
+                                  Remove
+                                </button>
+                              </form>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <form method="post" action="/api/lists" class="flex flex-wrap items-end gap-2">
+                        <input type="hidden" name="action" value="add-collaborator" />
                         <input type="hidden" name="listId" value={list.id} />
-                        <input type="hidden" name="isPublic" value={list.isPublic ? 'private' : 'public'} />
-                        <button type="submit" class="meta text-ink-3 hover:text-ink">
-                          Make {list.isPublic ? 'private' : 'public'}
+                        <div class="min-w-0 flex-1">
+                          <label class="meta block" for={`collab-handle-${list.id}`}>Add a collaborator</label>
+                          <input
+                            id={`collab-handle-${list.id}`}
+                            name="handle"
+                            required
+                            placeholder="handle"
+                            class="mt-1 w-full border border-rule bg-paper px-2 py-1 text-[0.875rem] focus:border-accent focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label class="meta block" for={`collab-role-${list.id}`}>Role</label>
+                          <select
+                            id={`collab-role-${list.id}`}
+                            name="role"
+                            class="mt-1 border border-rule bg-paper px-2 py-1 text-[0.875rem]"
+                          >
+                            <option value="viewer">Viewer (read)</option>
+                            <option value="editor">Editor (add/remove)</option>
+                          </select>
+                        </div>
+                        <button type="submit" class="border border-ink bg-ink px-2 py-1 text-[0.875rem] text-paper transition-colors hover:border-accent hover:bg-accent">
+                          Add
                         </button>
                       </form>
-                      {!list.isPublic &&
-                        (list.hasShareLink ? (
-                          <form method="post" action="/api/lists" class="contents">
-                            <input type="hidden" name="action" value="revoke" />
-                            <input type="hidden" name="listId" value={list.id} />
-                            <button type="submit" class="meta text-ink-3 hover:text-danger">
-                              Revoke link
-                            </button>
-                          </form>
-                        ) : (
-                          <form method="post" action="/api/lists" class="contents">
-                            <input type="hidden" name="action" value="share" />
-                            <input type="hidden" name="listId" value={list.id} />
-                            <button type="submit" class="meta text-ink-3 hover:text-ink">
-                              Get share link
-                            </button>
-                          </form>
-                        ))}
-                    </span>
-                  </div>
+                    </div>
+                  )}
                 </li>
               ))}
             </ol>
