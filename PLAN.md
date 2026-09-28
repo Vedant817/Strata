@@ -484,16 +484,16 @@ product, because it makes the "fully readable with JS disabled" budget structura
 - **DB + auth:** the plan called for **Supabase** — Postgres, Auth, Realtime, Edge Functions. The build
   uses **SQLite via libsql** instead, with handle-claim tokens rather than magic links. This is a
   deliberate deviation, and it has costs worth recording: no RLS, so tenancy rules live in application
-  code; no Realtime, so §5's live presence is not buildable as written; no `pgvector`, so Ask retrieval is
-  lexical FTS rather than embedding-based. Migrations and the local file make a deploy a config change
-  (`DATABASE_URL`), and Turso/libsql is the intended hosted target.
+  code; no Realtime, so §5's live presence is a heartbeat-and-count rather than a socket; no `pgvector`,
+  so Ask retrieval is lexical FTS rather than embedding-based. Migrations and the local file make a
+  deploy a config change (`DATABASE_URL`), and the hosted database is Turso (`strata`, default group)
+  — all 12 migrations, the seed, FTS5 `MATCH`, and remote reads and writes verified live against it.
 - **ORM:** Drizzle (typed, SQL-transparent, plays well with RLS).
 - **Retrieval:** SQLite **FTS5** with porter stemming, two indexes: `post_fts` for search and
   `block_fts` for Ask. Block scope is what makes Ask's grounding promise structural rather than a
-  convention — the post id is inside every query's filter.
-- **AI:** none attached. Ask is extractive, so the "grounded or refuse" guarantee holds without a model
-  and costs nothing. When a model arrives it answers *from the retrieved passages*, behind the
-  per-author caps.
+  convention — the post id is inside every query's filter. Verified working on Turso, not just local.
+- **AI:** the model-backed Ask answers *from the retrieved passages*, behind per-author daily caps and
+  a circuit breaker, with extractive fallback on every failure path. See `src/lib/model.ts`.
 - **Telemetry:** first-party `read_events` in SQLite. No third-party analytics, by policy.
 - **Deploy:** Node standalone on Render (fits the existing setup). Preview deploys per PR.
 
