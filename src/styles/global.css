@@ -478,6 +478,14 @@ mark {
   border-radius: 1px;
   padding-inline: 1px;
 }
+/* A reader's own highlight is a warmer, quieter mark than a search hit: it is
+   not pointing at a query, it is a bookmark, so it reads as an underline the
+   reader drew rather than a highlight the app applied. */
+mark[data-reader-highlight] {
+  background: color-mix(in oklab, var(--ochre) 16%, transparent);
+  border-bottom-color: color-mix(in oklab, var(--ochre) 55%, transparent);
+  border-bottom-width: 2px;
+}
 /* A reply sits inside its parent's rail entry, so it reads as a continuation
    rather than a second thing arguing with the same sentence. */
 .note-reply {
@@ -530,6 +538,28 @@ mark {
   white-space: nowrap;
 }
 .affordance:hover { border-color: var(--accent); color: var(--accent); }
+
+/* When a selection offers two actions (annotate vs highlight) they travel
+   together in one positioned group, so the two buttons cannot end up at
+   different points. The group owns the viewport coordinates and the lift; the
+   buttons inside flow normally, because `position: fixed` children would each
+   resolve their own static position and break the shared alignment. */
+.affordance-group {
+  position: fixed;
+  z-index: 30;
+  transform: translate(-50%, -100%);
+  display: inline-flex;
+  align-items: stretch;
+  gap: 1px;
+  border: 1px solid var(--rule-strong);
+  background: var(--rule-strong);
+}
+.affordance-group > .affordance {
+  position: static;
+  transform: none;
+  border: 0;
+  background: var(--surface);
+}
 
 /* ---------------------------------------------------------------------------
    9. Print — a reading product must print well

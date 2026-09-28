@@ -59,6 +59,10 @@ export default function Marginalia({ postId, versionId, canWriteAuthorNote, sign
   const [message, setMessage] = useState('');
   const textarea = useRef<HTMLTextAreaElement | null>(null);
   const composer = useRef<HTMLDivElement | null>(null);
+  /** The live Range for the current selection, kept so highlighting can wrap
+   *  the exact words the reader chose. Cloned because the live selection is
+   *  cleared the moment focus moves to any button. */
+  const rangeRef = useRef<Range | null>(null);
 
   const close = useCallback(() => {
     setSelection(null);
@@ -93,6 +97,9 @@ export default function Marginalia({ postId, versionId, canWriteAuthorNote, sign
       const range = sel.getRangeAt(0);
       const rect = range.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) return;
+      // Clone it now: `selectionchange` fires again and the live selection is
+      // collapsed the instant the reader clicks a button.
+      rangeRef.current = range.cloneRange();
 
       // Context hints only help disambiguate; the server has the real text.
       const blockText = block.textContent ?? '';
@@ -149,6 +156,55 @@ export default function Marginalia({ postId, versionId, canWriteAuthorNote, sign
   useEffect(() => {
     if (phase === 'composing') textarea.current?.focus();
   }, [phase]);
+
+  /* --- highlight ---------------------------------------------------------- */
+
+  /**
+   * Toggle a highlight for the current selection.
+   *
+   * Deliberately silent: no toast, no count, nothing announced. A highlight is
+   * the reader's private bookmark and the only trace is a warm underline they
+   * can see in the text — §1.1 refuses to turn a private act into applause, and
+   * an animation that celebrates it would be applause in miniature. The underline
+   * itself is the only feedback, because silence that leaves the reader unsure
+   * whether the click registered would be its own failure.
+   */
+  const highlightSelection = useCallback(
+    async (sel: Selection) => {
+      const range = rangeRef.current;
+      setSelection(null);
+      setPhase('idle');
+      try {
+        const res = await fetch('/api/highlight', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ postId, blockId: sel.blockId, text: sel.quote }),
+        });
+        if (!res.ok) return;
+        // Wrap the exact range the reader selected, so the mark lands on the
+        // words they chose and not the whole paragraph. Unwrapping on a second
+        // click keeps it a true toggle in place, which is what a reader
+        // expects from the same gesture twice.
+        if (range) {
+          const existing = range.startContainer.parentElement?.closest('mark[data-reader-highlight]');
+          if (existing) existing.replaceWith(...Array.from(existing.childNodes));
+          else if (!range.collapsed) {
+            const mark = document.createElement('mark');
+            mark.setAttribute('data-reader-highlight', '');
+            try {
+              range.surroundContents(mark);
+            } catch {
+              // A range that crosses element boundaries cannot be wrapped as one
+              // node; the server-side list at the article foot still shows it.
+            }
+          }
+        }
+      } catch {
+        // Ambient. A failed highlight must never interrupt reading.
+      }
+    },
+    [postId],
+  );
 
   /* --- optimistic insert ------------------------------------------------- */
   function insertLocally(id: string) {
@@ -246,25 +302,40 @@ export default function Marginalia({ postId, versionId, canWriteAuthorNote, sign
       )}
 
       {/* Once the composer is open the affordance is redundant and sits on top
-          of the text it points at. */}
+          of the text it points at. Two actions, because highlighting and
+          annotating are different acts: a highlight is silent and private, a
+          note is public and social. Offering them as one button would make the
+          quiet one loud. */}
       {selection && phase === 'idle' && (
-        <button
-          type="button"
-          className="affordance"
+        <div
+          className="affordance-group"
           /* Clamped: a selection in the first line of the document would put the
              button above the viewport, and one near the right edge would push it
              off-screen on a phone. */
           style={{
-            left: Math.min(Math.max(selection.x, 90), window.innerWidth - 90),
+            left: Math.min(Math.max(selection.x, 110), window.innerWidth - 110),
             top: Math.max(selection.y - 8, 40),
           }}
-          onClick={() => {
-            setPhase('composing');
-            requestAnimationFrame(() => textarea.current?.focus());
-          }}
         >
-          Leave a note →
-        </button>
+          <button
+            type="button"
+            className="affordance"
+            onClick={() => {
+              setPhase('composing');
+              requestAnimationFrame(() => textarea.current?.focus());
+            }}
+          >
+            Leave a note →
+          </button>
+          <button
+            type="button"
+            className="affordance"
+            onClick={() => void highlightSelection(selection)}
+            aria-label="Highlight this for yourself"
+          >
+            Highlight
+          </button>
+        </div>
       )}
 
       {selection && phase !== 'idle' && phase !== 'done' && (

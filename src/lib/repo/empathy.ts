@@ -1,6 +1,7 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { readyDb } from '../db';
 import { annotations, asks, blocks, posts, readEvents } from '../db/schema';
+import { getHighlights } from './highlights';
 import { blockToPlainText, parseBody } from '../blocks';
 
 /**
@@ -171,25 +172,18 @@ export async function getEmpathyReport(postId: string): Promise<EmpathyReport | 
   const confusion: ConfusionSignal[] = [];
 
   if (!suppressed) {
-    // Highlights: the `highlight` event carries the block; the text is the
-    // block's own opening, because per-span highlight storage is not built.
-    const hl = await database
-      .select({
-        blockId: readEvents.blockId,
-        readers: sql<number>`count(distinct ${readEvents.anonId})`,
-      })
-      .from(readEvents)
-      .where(and(eq(readEvents.postId, postId), eq(readEvents.event, 'highlight')))
-      .groupBy(readEvents.blockId)
-      .orderBy(desc(sql`count(distinct ${readEvents.anonId})`))
-      .limit(5);
+    // Highlights come from the `highlights` table, which is where they are
+    // actually written. The previous query read `read_events` filtered to
+    // `event = 'highlight'` — an event nothing has ever emitted, so the "what
+    // got highlighted" panel was permanently empty while claiming to be real.
+    // Aggregated per block, never per person.
+    const hl = await getHighlights(postId, 5);
     for (const h of hl) {
-      if (!h.blockId) continue;
       const block = byId.get(h.blockId);
       hotspots.push({
         blockId: h.blockId,
-        text: (block ? blockToPlainText(block) : '').replace(/\s+/g, ' ').trim().slice(0, 180),
-        readers: Number(h.readers),
+        text: h.text || (block ? blockToPlainText(block) : '').replace(/\s+/g, ' ').trim().slice(0, 180),
+        readers: h.readers,
       });
     }
 

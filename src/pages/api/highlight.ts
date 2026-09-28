@@ -21,14 +21,35 @@ const schema = z.object({
 });
 
 export const POST: APIRoute = async ({ request, cookies, redirect }) => {
-  const form = await request.formData().catch(() => null);
-  const back = typeof form?.get('returnTo') === 'string' ? (form.get('returnTo') as string) : '/';
-  const parsed = schema.safeParse(form ? Object.fromEntries(form) : null);
-  if (!parsed.success) return redirect(back, 303);
+  const contentType = request.headers.get('content-type') ?? '';
+  let raw: Record<string, unknown> | null = null;
+  let back = '/';
+  if (contentType.includes('application/json')) {
+    // The island's path. Answers 200 so a failed highlight is visible in the
+    // network tab instead of redirecting the reader off the article.
+    raw = await request.json().catch(() => null);
+  } else {
+    const form = await request.formData().catch(() => null);
+    back = typeof form?.get('returnTo') === 'string' ? (form.get('returnTo') as string) : '/';
+    raw = form ? Object.fromEntries(form) : null;
+  }
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    if (contentType.includes('application/json')) {
+      return new Response(JSON.stringify({ error: 'Invalid highlight.' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return redirect(back, 303);
+  }
 
   const identity = await getIdentity(cookies);
   const anonId = cookies.get(ANON_COOKIE)?.value ?? identity.anonId;
-  if (!anonId) return redirect(back, 303);
+  if (!anonId) {
+    if (contentType.includes('application/json')) return new Response(null, { status: 204 });
+    return redirect(back, 303);
+  }
 
   const added = await toggleHighlight({
     postId: parsed.data.postId,
@@ -38,6 +59,11 @@ export const POST: APIRoute = async ({ request, cookies, redirect }) => {
     userId: identity.userId,
   });
 
+  if (contentType.includes('application/json')) {
+    return new Response(JSON.stringify({ ok: true, highlighted: added }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  }
   return redirect(`${back}${back.includes('?') ? '&' : '?'}hl=${added ? 'on' : 'off'}`, 303);
 };
 
