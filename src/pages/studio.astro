@@ -9,6 +9,7 @@ import { getPostById, suggestLinks } from '../lib/repo/posts';
 import { lintCitations, type LintReport } from '../lib/lint';
 import { driftScore, featuresOfBlocks, readVoice, type VoiceProfile } from '../lib/repo/voice';
 import { getReportedNotes } from '../lib/repo/annotations';
+import { buildDigest, getDigestSubscribers } from '../lib/repo/digest';
 import { ago, plural } from '../lib/format';
 
 /**
@@ -48,6 +49,12 @@ if (identity.userId) {
   }
 }
 const flagged = identity.userId ? await getReportedNotes(identity.userId) : [];
+const digestPreview = identity.userId
+  ? {
+      ...(await buildDigest(Date.now() - 7 * 86_400_000)),
+      subscribers: (await getDigestSubscribers()).length,
+    }
+  : { items: [], subscribers: 0 };
 const ownedLists = identity.userId ? await myReadingLists(identity.userId) : [];
 
 /* Link suggestions across the writer's own posts. Computed live; each post
@@ -143,6 +150,79 @@ const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
             <p class="meta mt-1">Nothing was changed.</p>
           </div>
         )}
+
+        <section aria-labelledby="loom-heading">
+          <h2 id="loom-heading" class="text-xl">First loom</h2>
+          <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+            The loop the whole product is about, as a checklist. Each item is
+            computed from what actually happened — nothing here can be checked
+            off by visiting a page, because a tour completed is not a thing
+            learned.
+          </p>
+          <ol class="mt-4 space-y-3">
+            {(() => {
+              const published = health.length > 0;
+              const revised = health.some((p) => p.versionCount > 1);
+              const noted = health.some((p) => p.notes > 0);
+              const first = health[0];
+              const steps = [
+                {
+                  done: published,
+                  title: 'Publish something',
+                  detail: published
+                    ? `${plural(health.length, 'post')} live.`
+                    : 'Grow a fragment above, import an archive, or fork a post you wish existed.',
+                  href: published ? undefined : '#capture-heading',
+                },
+                {
+                  done: revised,
+                  title: 'Revise it',
+                  detail: revised
+                    ? 'At least one post has a post-publish revision. That is the maintenance flywheel turning.'
+                    : first
+                      ? 'Open your newest post in the editor, change a sentence, and publish with a summary.'
+                      : 'Needs a published post first.',
+                  href: !revised && first ? `/studio/edit/${first.slug}` : undefined,
+                },
+                {
+                  done: noted,
+                  title: 'Earn a margin note',
+                  detail: noted
+                    ? 'A reader argued with a specific sentence. Reply from the margin.'
+                    : 'Cannot be forced — but posts with a live diff and an honest dek get read, and read posts get argued with.',
+                  href: undefined,
+                },
+              ];
+              const doneCount = steps.filter((s) => s.done).length;
+              return (
+                <>
+                  <p class="meta mb-1" role="status">
+                    {doneCount} of {steps.length} woven
+                    {doneCount === steps.length ? ' — loom complete.' : ''}
+                  </p>
+                  {steps.map((s) => (
+                    <li class="flex items-start gap-3 border border-rule p-3">
+                      <span aria-hidden="true" class="mt-0.5 font-mono text-[0.875rem]">
+                        {s.done ? '✓' : '○'}
+                      </span>
+                      <div class="min-w-0">
+                        <p class="text-[0.9375rem] font-medium">{s.title}</p>
+                        <p class="mt-0.5 text-[0.875rem] leading-relaxed text-ink-2">{s.detail}</p>
+                        {s.href && !s.done && (
+                          <p class="meta mt-1.5">
+                            <a href={s.href} class="no-underline hover:text-ink">
+                              Start →
+                            </a>
+                          </p>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </>
+              );
+            })()}
+          </ol>
+        </section>
 
         <section aria-labelledby="capture-heading">
           <h2 id="capture-heading" class="text-xl">Capture</h2>
@@ -489,6 +569,45 @@ const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
                   Re-learn from current posts
                 </button>
               </form>
+            </>
+          )}
+        </section>
+
+        <section aria-labelledby="digest-heading">
+          <h2 id="digest-heading" class="text-xl">Weekly digest</h2>
+          <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+            What Monday's send would contain — same function the sender calls,
+            so the preview cannot drift from what goes out. Empty weeks send
+            nothing.
+          </p>
+          {digestPreview.items.length === 0 ? (
+            <p class="mt-3 border-l-2 border-rule-strong pl-3 text-[0.9375rem] text-ink-2">
+              Quiet week: nothing new or revised in the last seven days.
+              {digestPreview.subscribers === 0
+                ? ' Nobody subscribed yet, either.'
+                : ` ${digestPreview.subscribers} ${digestPreview.subscribers === 1 ? 'subscriber' : 'subscribers'} waiting.`}
+            </p>
+          ) : (
+            <>
+              <ol class="mt-4 space-y-3">
+                {digestPreview.items.map((item, i) => (
+                  <li class="border border-rule p-3">
+                    <p class="meta">
+                      {i + 1} · {item.kind === 'new' ? 'new' : 'revised'}
+                    </p>
+                    <p class="mt-1 font-medium">
+                      <a href={`/w/${item.slug}`} class="no-underline hover:text-accent">
+                        {item.title}
+                      </a>
+                    </p>
+                    <p class="mt-1 text-[0.875rem] text-ink-2">{item.detail}</p>
+                  </li>
+                ))}
+              </ol>
+              <p class="meta mt-3">
+                {digestPreview.subscribers} {digestPreview.subscribers === 1 ? 'subscriber' : 'subscribers'} ·
+                sends Monday 09:00 UTC when DEPLOY_URL and CRON_SECRET are set
+              </p>
             </>
           )}
         </section>

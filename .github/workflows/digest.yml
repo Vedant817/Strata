@@ -1,0 +1,34 @@
+name: Weekly digest
+
+# The return hook, §10.4: three posts with an honest reason each, opt-in only.
+# This workflow does nothing until two repository secrets exist:
+#   DEPLOY_URL  — the public origin, e.g. https://strata.pub
+#   CRON_SECRET — the same value as the server's CRON_SECRET env var
+# Without them it exits 0 having sent nothing, rather than failing weekly
+# forever against a URL nobody configured.
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: weekly-digest
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send the digest
+        env:
+          DEPLOY_URL: ${{ secrets.DEPLOY_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$DEPLOY_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "DEPLOY_URL or CRON_SECRET not set — skipping, not failing."
+            exit 0
+          fi
+          curl -fsS -X POST "$DEPLOY_URL/api/cron/digest" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H 'Content-Type: application/json'
