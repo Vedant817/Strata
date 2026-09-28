@@ -71,6 +71,13 @@
       "when": 1790600858726,
       "tag": "0009_ask_model_budgets",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1790605316239,
+      "tag": "0010_revision_notified",
+      "breakpoints": true
     }
   ]
 }

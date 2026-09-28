@@ -157,6 +157,7 @@ const myHighlightCount = myHighlights.length;
  *  reader lands back on the revision or sort they were reading. */
 const returnTo = Astro.url.pathname + Astro.url.search;
 const noteError = Astro.url.searchParams.get('noteError');
+const subscribeState = Astro.url.searchParams.get('subscribe');
 const errorNoteId = Astro.url.searchParams.get('note');
 
 /** Ask this article. A GET, so an answer is a link anyone can open — and so a
@@ -630,6 +631,55 @@ const jsonLd = [
             </ol>
           </section>
         )}
+
+        <section aria-labelledby="revise-heading" class="border-t border-rule pt-6">
+          <h2 id="revise-heading" class="text-xl">When this changes</h2>
+          <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+            {
+              view.current.versionNumber > 1
+                ? `This post has been revised ${view.current.versionNumber - 1} ${view.current.versionNumber === 2 ? 'time' : 'times'}. Leave an address and you will hear the next time it moves — once, and only for a substantial change, not a typo.`
+                : 'Leave an address and you will hear if this post is ever substantially revised — once, and only when it actually changes.'
+            }
+          </p>
+          {subscribeState === 'on' ? (
+            <p class="mt-3 border-l-2 border-accent pl-3 text-[0.9375rem] text-ink-2" role="status">
+              You will hear when it changes. If you did not expect this, it is
+              already done and the address was not stored anywhere else.
+            </p>
+          ) : subscribeState === 'off' ? (
+            <p class="mt-3 border-l-2 border-rule-strong pl-3 text-[0.9375rem] text-ink-2" role="status">
+              Unsubscribed. You will not hear about further changes.
+            </p>
+          ) : (
+            <form method="post" action="/api/subscribe" class="mt-4 flex max-w-md flex-wrap items-end gap-2">
+              <input type="hidden" name="postId" value={post.id} />
+              <input type="hidden" name="returnTo" value={returnTo} />
+              <div class="min-w-0 flex-1">
+                <label class="meta block" for="rev-email">Email</label>
+                <input
+                  id="rev-email"
+                  name="email"
+                  type="email"
+                  required
+                  autocomplete="email"
+                  placeholder="you@example.com"
+                  class="mt-1 w-full border border-rule bg-paper px-3 py-2 text-[0.9375rem] focus:border-accent focus:outline-none"
+                />
+              </div>
+              <button
+                type="submit"
+                class="shrink-0 border border-ink bg-ink px-3 py-2 text-[0.9375rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+              >
+                Tell me
+              </button>
+              {subscribeState === 'bad-email' && (
+                <p class="w-full text-[0.875rem] text-danger" role="alert">
+                  That does not look like an email address.
+                </p>
+              )}
+            </form>
+          )}
+        </section>
       </div>
     </div>
 

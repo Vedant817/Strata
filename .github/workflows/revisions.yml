@@ -1,0 +1,37 @@
+name: Revision notices
+
+# The maintenance flywheel. A subscriber asked to hear when a post they read is
+# substantially revised; this delivers that, and only that.
+#
+# Daily, not weekly: the whole value of a revision notice is that it arrives
+# while the reader still remembers the original. Waiting until Monday is the
+# difference between "this changed" and "what does this article say".
+#
+# The send is idempotent per (post, version) in the data, so a retry, a double
+# fire, or a failed run loses nothing.
+
+on:
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: revision-notices
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send revision notices
+        env:
+          DEPLOY_URL: ${{ secrets.DEPLOY_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$DEPLOY_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "DEPLOY_URL or CRON_SECRET not set — skipping, not failing."
+            exit 0
+          fi
+          curl -fsS -X POST "$DEPLOY_URL/api/cron/revisions" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H 'Content-Type: application/json'

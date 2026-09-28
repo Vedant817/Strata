@@ -526,6 +526,10 @@ export const revisionSubscriptions = sqliteTable(
       .notNull()
       .references(() => posts.id, { onDelete: 'cascade' }),
     email: text('email').notNull(),
+    /** The version this subscriber was last told about. Null = never. The
+     *  send is idempotent per (post, version) via this column, so a re-run or
+     *  a second instance cannot double-email. */
+    notifiedVersionId: text('notified_version_id'),
     createdAt: integer('created_at').notNull().default(now),
   },
   (t) => [uniqueIndex('revision_subscriptions_uq').on(t.postId, t.email)],
