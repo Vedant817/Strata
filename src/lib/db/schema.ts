@@ -429,6 +429,33 @@ export const asks = sqliteTable(
   (t) => [index('asks_post_idx').on(t.postId), index('asks_block_idx').on(t.postId, t.blockId)],
 );
 
+/**
+ * Per-author model budget and circuit breaker, §4.5's cost boundary.
+ *
+ * A public reader-facing feature that calls a paid model is a money risk
+ * dressed as a feature, so the boundary is enforced in the database, not in
+ * process memory: a restart cannot reset it, and two instances cannot each
+ * decide they are the first to spend. `windowStart` is a day bucket;
+ * `consecutiveFailures` trips the breaker so one bad upstream stops costing
+ * money on every request.
+ */
+export const askModelBudgets = sqliteTable(
+  'ask_model_budgets',
+  {
+    postId: text('post_id')
+      .primaryKey()
+      .references(() => posts.id, { onDelete: 'cascade' }),
+    /** Day bucket, ms since epoch — caps are per day, per author. */
+    windowStart: integer('window_start').notNull(),
+    calls: integer('calls').notNull().default(0),
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+    /** Epoch ms until which the breaker is open. Null = closed. */
+    openUntil: integer('open_until'),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [index('ask_budget_window_idx').on(t.windowStart)],
+);
+
 /* -------------------------------------------------------------------------- */
 /* Curation — the primary discovery unit                                        */
 /* -------------------------------------------------------------------------- */

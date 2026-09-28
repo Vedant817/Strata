@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { readyDb } from '../db';
 import { asks } from '../db/schema';
 import { nanoid } from '../ids';
+import { answerWithModel, isModelConfigured } from '../model';
 
 export interface AskPassage {
   blockId: string;
@@ -16,6 +17,11 @@ export interface AskResult {
   /** Milliseconds the retrieval took. Recorded, because cost caps start with
    *  knowing the cost of the cheap half before any model is attached. */
   latencyMs: number;
+  /** The model's grounded prose, when one was available and affordable.
+   *  Always paired with the same `passages` — the model summarizes, it does
+   *  not source. Null means the extractive quotes below are the answer. */
+  answer: string | null;
+  mode: 'extractive' | 'model';
 }
 
 /**
@@ -73,9 +79,32 @@ export async function askPost(
   const latencyMs = Date.now() - started;
   const matched = passages.length > 0;
 
+  // The model is an upgrade, never a dependency. If there is no key, no
+  // budget, an open breaker, a timeout, or the model abstains ("NOT
+  // COVERED"), we fall through to the extractive quotes — which are always
+  // present when matched. Grounding stays structural: the model only ever
+  // saw these passages, so its answer cannot outrun them.
+  let answer: string | null = null;
+  let mode: 'extractive' | 'model' = 'extractive';
+  if (isModelConfigured()) {
+    // Wrapped: the model is an upgrade, never a dependency. Even an
+    // unexpected throw (a DB hiccup in the budget table, say) must not break
+    // answering — the extractive quotes are the floor, always.
+    let model: Awaited<ReturnType<typeof answerWithModel>> = null;
+    try {
+      model = await answerWithModel(postId, clean, passages);
+    } catch (err) {
+      console.error('[strata] ask model path failed, falling back:', err);
+    }
+    if (model) {
+      answer = model.text;
+      mode = 'model';
+    }
+  }
+
   // The confusion signal. Unmatched questions are the interesting rows — they
-  // are exactly what the writer should write next, so they are stored with
-  // the same care as the answered ones.
+  // are exactly what the writer should write next, so they are stored with the
+  // same care as the answered ones.
   try {
     const database = await readyDb();
     await database.insert(asks).values({
@@ -84,9 +113,9 @@ export async function askPost(
       versionId,
       blockId: null,
       question: clean,
-      answer: matched ? passages.map((p) => p.quote.replace(/<\/?mark>/g, '')).join('\n\n') : '',
+      answer: answer ?? (matched ? passages.map((p) => p.quote.replace(/<\/?mark>/g, '')).join('\n\n') : ''),
       citations: JSON.stringify(passages.map((p) => ({ blockId: p.blockId }))),
-      mode: 'extractive',
+      mode,
       latencyMs,
       askedById,
     });
@@ -95,5 +124,5 @@ export async function askPost(
     console.error('[strata] ask log failed:', err);
   }
 
-  return { question: clean, matched, passages, latencyMs };
+  return { question: clean, matched, passages, latencyMs, answer, mode };
 }
