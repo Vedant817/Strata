@@ -5,7 +5,7 @@ import { resolvePrefs, ANON_COOKIE } from '../lib/prefs';
 import { getIdentity } from '../lib/repo/auth';
 import { getOpenAsks, listCaptures, myPostHealth, synthesizeInbox } from '../lib/repo/studio';
 import { getListShareToken, myReadingLists } from '../lib/repo/taxonomy';
-import { getPostById } from '../lib/repo/posts';
+import { getPostById, suggestLinks } from '../lib/repo/posts';
 import { lintCitations, type LintReport } from '../lib/lint';
 import { driftScore, featuresOfBlocks, readVoice, type VoiceProfile } from '../lib/repo/voice';
 import { getReportedNotes } from '../lib/repo/annotations';
@@ -49,6 +49,17 @@ if (identity.userId) {
 }
 const flagged = identity.userId ? await getReportedNotes(identity.userId) : [];
 const ownedLists = identity.userId ? await myReadingLists(identity.userId) : [];
+
+/* Link suggestions across the writer's own posts. Computed live; each post
+   costs one FTS query, which is cheap enough that no caching layer has to be
+   invented and then kept honest. */
+const linkSuggestions = new Map<string, Awaited<ReturnType<typeof suggestLinks>>>();
+if (identity.userId) {
+  for (const post of health.slice(0, 10)) {
+    const suggestions = await suggestLinks(post.id, identity.userId, 3);
+    if (suggestions.length > 0) linkSuggestions.set(post.id, suggestions);
+  }
+}
 const sharedListId = Astro.url.searchParams.get('shared');
 let sharedLink: string | null = null;
 if (identity.userId && sharedListId) {
@@ -586,6 +597,64 @@ const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
             </ol>
           )}
         </section>
+
+        {linkSuggestions.size > 0 && (
+          <section aria-labelledby="links-heading">
+            <h2 id="links-heading" class="text-xl">Connect the archive</h2>
+            <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+              Posts sharing vocabulary that are not linked yet. Shared words
+              can mean a real relationship or a coincidence — you decide the
+              type, or leave them be.
+            </p>
+            <ol class="mt-4 space-y-4">
+              {health
+                .filter((post) => linkSuggestions.has(post.id))
+                .map((post) => (
+                  <li class="border border-rule p-4">
+                    <p class="meta">
+                      From{' '}
+                      <a href={`/w/${post.slug}`} class="no-underline hover:text-ink">
+                        {post.title}
+                      </a>
+                    </p>
+                    <ul class="mt-2 space-y-3">
+                      {(linkSuggestions.get(post.id) ?? []).map((s) => (
+                        <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-rule pt-3 first:border-t-0 first:pt-0">
+                          <div class="min-w-0 flex-1">
+                            <a href={`/w/${s.slug}`} class="no-underline hover:text-accent">
+                              {s.title}
+                            </a>
+                            <p class="meta mt-1">shares: {s.shared.join(', ')}</p>
+                          </div>
+                          <form method="post" action="/api/studio" class="flex items-center gap-2">
+                            <input type="hidden" name="action" value="link" />
+                            <input type="hidden" name="fromPostId" value={post.id} />
+                            <input type="hidden" name="toSlug" value={s.slug} />
+                            <select
+                              name="type"
+                              aria-label={`Link type from ${post.title} to ${s.title}`}
+                              class="border border-rule bg-paper px-2 py-1 text-[0.8125rem] focus:border-accent focus:outline-none"
+                            >
+                              <option value="mentions">mentions</option>
+                              <option value="cites">cites</option>
+                              <option value="extends">extends</option>
+                              <option value="contradicts">contradicts</option>
+                            </select>
+                            <button
+                              type="submit"
+                              class="border border-ink bg-ink px-2 py-1 text-[0.8125rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+                            >
+                              Link
+                            </button>
+                          </form>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+            </ol>
+          </section>
+        )}
 
         {flagged.length > 0 && (
           <section aria-labelledby="flagged-heading">

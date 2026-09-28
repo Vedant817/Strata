@@ -605,6 +605,127 @@ export async function addLink(fromPostId: string, toPostId: string, type: 'cites
   await database.insert(postLinks).values({ fromPostId, toPostId, type }).onConflictDoNothing();
 }
 
+export interface LinkSuggestion {
+  postId: string;
+  slug: string;
+  title: string;
+  dek: string;
+  shared: string[];
+  /** TF-IDF overlap weight. Internal ranking only — never shown, because a
+   *  number would imply a confidence the heuristic does not have. */
+  score?: number;
+}
+
+/**
+ * Back-catalog linking suggestions.
+ *
+ * A writer with ten posts cannot hold all pairwise connections in their head,
+ * so old posts stay unlinked and the graph stays thin where it should be
+ * dense. For each owned post, take significant terms from its title and dek,
+ * match them against the post index, and exclude the post itself plus
+ * everything already linked in either direction. What remains is a short list
+ * of "did you mean to connect these?" — the writer still decides the type or
+ * dismisses it, because only the writer knows whether shared vocabulary means
+ * a real relationship or a coincidence.
+ */
+export async function suggestLinks(postId: string, authorId: string, limit = 5): Promise<LinkSuggestion[]> {
+  const database = await readyDb();
+  const { parseBody } = await import('../blocks');
+  const { blockToPlainText } = await import('../blocks');
+
+  const [own] = await database
+    .select({ id: posts.id, body: postVersions.body })
+    .from(posts)
+    .innerJoin(postVersions, eq(posts.currentVersionId, postVersions.id))
+    .where(and(eq(posts.id, postId), eq(posts.authorId, authorId)))
+    .limit(1);
+  if (!own) return [];
+
+  /* Distinctive terms, not just frequent ones. "System" appears everywhere
+     and suggests everything; "eviction" appears here and almost nowhere else,
+     so a post containing it is probably actually related. Term frequency in
+     this post times inverse frequency across the corpus, top eight. At five
+     posts the corpus fits in memory without thinking about it. */
+  const STOP = new Set(
+    'about above after again against always among another around because become before behind being below between both during every first from further had having here however into itself just like made make many might more most much never often only other ought same should since some such than that their them then there these through under until want were what when where which while with within without would your this have will there their said each which how the and for are but not you all any can had her was one our out day get has him his how man new now old see two way who boy did its let put say she too use'.split(
+      ' ',
+    ),
+  );
+  const wordOf = (text: string) =>
+    (text.toLowerCase().match(/[a-z][a-z'-]{4,}/g) ?? []).filter((w) => !STOP.has(w));
+
+  const ownText = parseBody(own.body).map((b) => blockToPlainText(b)).join(' ');
+  const ownCounts = new Map<string, number>();
+  for (const w of wordOf(ownText)) ownCounts.set(w, (ownCounts.get(w) ?? 0) + 1);
+
+  const others = await database
+    .select({ slug: posts.slug, body: postVersions.body })
+    .from(posts)
+    .innerJoin(postVersions, eq(posts.currentVersionId, postVersions.id))
+    .where(and(eq(posts.visibility, 'public'), sql`${posts.publishedAt} is not null`));
+  const docFreq = new Map<string, number>();
+  const bodies = new Map<string, string>();
+  for (const o of others) {
+    const text = parseBody(o.body).map((b) => blockToPlainText(b)).join(' ');
+    bodies.set(o.slug, text);
+    for (const w of new Set(wordOf(text))) docFreq.set(w, (docFreq.get(w) ?? 0) + 1);
+  }
+
+  const N = Math.max(1, others.length);
+  const idf = new Map<string, number>();
+  for (const [w, tf] of ownCounts) {
+    void tf;
+    idf.set(w, Math.log(1 + N / (docFreq.get(w) ?? 1)));
+  }
+  // Distinctive terms first, for display. But matching requires only weight:
+  // one very distinctive shared word ("eviction", "p99") is a stronger signal
+  // than three generic ones, and demanding two shared *distinctive* terms is
+  // nearly contradictory — distinctive means rare elsewhere.
+  const ranked = [...ownCounts.entries()]
+    .map(([w, tf]) => ({ w, weight: tf * (idf.get(w) ?? 0) }))
+    .sort((a, b) => b.weight - a.weight);
+  const display = ranked.slice(0, 8).map((s) => s.w);
+  const weights = new Map(ranked.map((s) => [s.w, s.weight]));
+  if (display.length < 2) return [];
+
+  const outIds = await database
+    .select({ id: postLinks.toPostId })
+    .from(postLinks)
+    .where(eq(postLinks.fromPostId, postId));
+  const inIds = await database
+    .select({ id: postLinks.fromPostId })
+    .from(postLinks)
+    .where(eq(postLinks.toPostId, postId));
+  const linkedSlugs = new Set<string>();
+  for (const r of [...outIds, ...inIds]) {
+    const [p] = await database.select({ slug: posts.slug }).from(posts).where(eq(posts.id, r.id)).limit(1);
+    if (p) linkedSlugs.add(p.slug);
+  }
+
+  const [self] = await database.select({ slug: posts.slug }).from(posts).where(eq(posts.id, postId)).limit(1);
+  const out: LinkSuggestion[] = [];
+  for (const o of others) {
+    if (o.slug === self?.slug || linkedSlugs.has(o.slug)) continue;
+    const words = wordOf(bodies.get(o.slug) ?? '');
+    const shared = [...new Set(words.filter((w) => weights.has(w)))];
+    const score = shared.reduce((n, w) => n + (weights.get(w) ?? 0), 0);
+    // Roughly two average terms, or one very distinctive one. Below this the
+    // "suggestions" are coincidences wearing a trench coat.
+    if (score < 2.0) continue;
+    shared.sort((a, b) => (weights.get(b) ?? 0) - (weights.get(a) ?? 0));
+    const [meta] = await database
+      .select({ id: posts.id, title: posts.title, dek: posts.dek })
+      .from(posts)
+      .where(eq(posts.slug, o.slug))
+      .limit(1);
+    if (!meta) continue;
+    out.push({ postId: meta.id, slug: o.slug, title: meta.title, dek: meta.dek, shared: shared.slice(0, 4), score });
+    if (out.length >= limit * 2) break;
+  }
+  out.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return out.slice(0, limit);
+}
+
 export async function getLineage(postId: string) {
   const database = await readyDb();
   const ancestors: Array<{ depth: number; slug: string; title: string; dek: string }> = [];

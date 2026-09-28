@@ -21,7 +21,9 @@ export interface SearchHit {
  * operator left is the implicit AND. The final term gets a prefix wildcard so
  * a half-typed thought still finds its post.
  */
-function toFtsQuery(raw: string): string | null {
+/** Quoted FTS terms from free text, safe to interpolate into MATCH. Exported
+ *  so link suggestions use the same sanitization as search itself. */
+export function toFtsQuery(raw: string): string | null {
   const terms = raw
     .split(/\s+/)
     .map((t) => t.replace(/["*]/g, '').trim())

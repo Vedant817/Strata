@@ -578,8 +578,7 @@ export async function getListShareToken(listId: string, ownerId: string): Promis
   return row?.shareToken ?? null;
 }
 
-/** Every list this user owns, including private ones the index never shows. */
-export async function myReadingLists(ownerId: string) {
+/** Every list this user owns, including private ones the index never shows. */export async function myReadingLists(ownerId: string) {
   const database = await readyDb();
   const lists = await database
     .select({
