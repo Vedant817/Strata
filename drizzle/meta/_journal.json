@@ -57,6 +57,13 @@
       "when": 1790574005946,
       "tag": "0007_list_share_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790596875931,
+      "tag": "0008_presence_heartbeats",
+      "breakpoints": true
     }
   ]
 }

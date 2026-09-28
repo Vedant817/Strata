@@ -222,9 +222,45 @@ const jsonLd = [
             )
           }
           {reviewed && <span> · reviewed {reviewed}</span>}
+          <span data-presence aria-hidden="true"></span>
         </p>
       </div>
     </header>
+    <script is:inline define:vars={{ postId: post.id }}>
+      (() => {
+        /* Presence heartbeat: anonymous, silent, ambient. Beats while the page
+           is visible; the count next to the byline updates from the same
+           endpoint. Nothing here identifies anyone — the server only ever
+           counts, and a failed beat changes nothing on screen. */
+        const slot = document.querySelector('[data-presence]');
+        if (!slot) return;
+        const paint = (n) => {
+          slot.textContent = n >= 2 ? ` · ${n} reading now` : '';
+        };
+        const beat = async () => {
+          try {
+            await fetch('/api/presence', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ postId }),
+              keepalive: true,
+            });
+            const res = await fetch(`/api/presence?postId=${encodeURIComponent(postId)}`);
+            if (!res.ok) return;
+            const json = await res.json();
+            if (typeof json.readers === 'number') paint(json.readers);
+          } catch {
+            // Ambient. Never break the page over it.
+          }
+        };
+        const tick = () => {
+          if (document.visibilityState === 'visible') void beat();
+        };
+        void beat();
+        window.setInterval(tick, 30000);
+        document.addEventListener('visibilitychange', tick);
+      })();
+    </script>
 
     <div class="shell">
       <div class="article-body mt-6 space-y-3">

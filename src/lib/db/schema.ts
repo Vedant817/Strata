@@ -510,6 +510,21 @@ export const newsletterSubscribers = sqliteTable('newsletter_subscribers', {
   createdAt: integer('created_at').notNull().default(now),
 });
 
+export const presenceHeartbeats = sqliteTable(
+  'presence_heartbeats',
+  {
+    anonKey: text('anon_key').notNull(),
+    postId: text('post_id')
+      .notNull()
+      .references(() => posts.id, { onDelete: 'cascade' }),
+    lastSeen: integer('last_seen').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.anonKey, t.postId] }),
+    index('presence_post_idx').on(t.postId, t.lastSeen),
+  ],
+);
+
 export const follows = sqliteTable(
   'follows',
   {
