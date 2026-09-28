@@ -1,0 +1,326 @@
+---
+/**
+ * The reading loop's only interaction: select a sentence, say something about
+ * it. No account, no modal, no sign-up wall between the impulse and the note.
+ *
+ * Plain DOM, no framework — and that is not a compromise, it is the design.
+ * Notes are server-rendered and fully readable with JavaScript off; this only
+ * *adds* the ability to write, and the way it adds it is by moving a handful of
+ * DOM nodes and posting a form. A framework runtime would have cost more than
+ * the whole rest of the reading page, to re-render a textarea.
+ *
+ * The client sends the selected *text*, never character offsets. The rendered
+ * DOM has already consumed its inline markup, so DOM offsets do not correspond
+ * to source offsets, and a client-computed anchor would be wrong the moment a
+ * paragraph contained a code span. The server resolves the quote against the
+ * real block text.
+ */
+interface Props {
+  postId: string;
+  versionId: string;
+  canWriteAuthorNote: boolean;
+  signedInAs: string | null;
+}
+const { postId, versionId, canWriteAuthorNote, signedInAs } = Astro.props;
+---
+
+<!-- Discoverability. Before this script runs there is no affordance at all, so
+     a reader who selects a sentence gets nothing and concludes the feature
+     does not exist. This is the hint that closes that gap. -->
+<p
+  class="fixed bottom-3 left-3 z-40 hidden border border-rule bg-surface px-3 py-2 lg:block"
+  data-marginalia-hint
+>
+  <span class="meta">Select any sentence to leave a note</span>
+</p>
+
+<!-- The affordance the script positions. Kept in markup (rather than built in
+     JS) so it is one predictable node, not something assembled on selection. -->
+<div class="affordance-group hidden" data-marginalia-affordance>
+  <button type="button" class="affordance" data-marginalia-note>Leave a note →</button>
+  <button type="button" class="affordance" data-marginalia-highlight aria-label="Highlight this for yourself">Highlight</button>
+</div>
+
+<script is:inline define:vars={{ postId, versionId, canWriteAuthorNote, signedInAs }}>
+  (() => {
+    const KINDS = [
+      { value: 'comment', label: 'Comment', hint: 'A general response to this sentence.' },
+      { value: 'correction', label: 'Correction', hint: 'This is wrong. Say what is right.' },
+      { value: 'extension', label: 'Extension', hint: 'It goes further than the post claims.' },
+      { value: 'disagreement', label: 'Disagreement', hint: 'The conclusion does not follow.' },
+      { value: 'worked_example', label: 'Worked example', hint: 'Concrete numbers or a case.' },
+      { value: 'update', label: 'Update', hint: 'This has since changed in the world.' },
+    ];
+
+    const hint = document.querySelector('[data-marginalia-hint]');
+    const affordance = document.querySelector('[data-marginalia-affordance]');
+    if (!affordance) return;
+
+    /** Current selection, or null. */
+    let selection = null; // { blockId, quote, prefixHint, suffixHint, x, y, range }
+    let composer = null;
+    let kind = 'comment';
+    let scrollAtSelection = window.scrollY;
+
+    const clear = () => {
+      selection = null;
+      affordance.classList.add('hidden');
+      if (composer) {
+        composer.remove();
+        composer = null;
+      }
+      if (hint) hint.classList.remove('hidden');
+    };
+
+    /* --- selection capture ------------------------------------------------ */
+    function onSelect() {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+      const text = sel.toString().replace(/\s+/g, ' ').trim();
+      if (text.length < 3 || text.length > 600) return;
+      const node = sel.anchorNode;
+      const el = node instanceof Element ? node : node?.parentElement;
+      const block = el?.closest('[data-block-id]');
+      if (!block) return;
+      const type = block.getAttribute('data-block-type');
+      if (!type || !['paragraph', 'quote', 'tldr', 'callout', 'list'].includes(type)) return;
+      const range = sel.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) return;
+
+      const blockText = block.textContent ?? '';
+      const at = blockText.indexOf(text);
+      scrollAtSelection = window.scrollY;
+      selection = {
+        blockId: block.getAttribute('data-block-id'),
+        quote: text,
+        prefixHint: at > 0 ? blockText.slice(Math.max(0, at - 64), at) : '',
+        suffixHint: at >= 0 ? blockText.slice(at + text.length, at + text.length + 64) : '',
+        x: rect.left + rect.width / 2,
+        y: rect.top,
+        range: range.cloneRange(),
+      };
+      positionAffordance();
+    }
+
+    function positionAffordance() {
+      if (!selection) return;
+      affordance.classList.remove('hidden');
+      if (hint) hint.classList.add('hidden');
+      affordance.style.left = Math.min(Math.max(selection.x, 110), window.innerWidth - 110) + 'px';
+      affordance.style.top = Math.max(selection.y - 8, 40) + 'px';
+    }
+
+    function onDown(e) {
+      const t = e.target;
+      if (composer && composer.contains(t)) return;
+      if (t instanceof Element && t.closest('.affordance')) return;
+      if (t instanceof Element && t.closest('[data-note-anchor]')) return;
+      clear();
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') clear();
+    }
+    function onScroll() {
+      if (Math.abs(window.scrollY - scrollAtSelection) < 40) return;
+      clear();
+    }
+    document.addEventListener('selectionchange', onSelect);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, { passive: true });
+
+    /* --- highlight --------------------------------------------------------- */
+    async function highlightSelection() {
+      const sel = selection;
+      if (!sel) return;
+      const range = sel.range;
+      clear();
+      try {
+        const res = await fetch('/api/highlight', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ postId, blockId: sel.blockId, text: sel.quote }),
+        });
+        if (!res.ok) return;
+        // Wrap the exact range the reader selected, so the mark lands on the
+        // words they chose and not the whole paragraph. Unwrapping on a second
+        // click keeps it a true toggle in place. A range that crosses element
+        // boundaries cannot be wrapped as one node; the reader's own list at the
+        // article foot still shows it.
+        if (range && range.startContainer.parentElement) {
+          const existing = range.startContainer.parentElement.closest('mark[data-reader-highlight]');
+          if (existing) {
+            existing.replaceWith(...Array.from(existing.childNodes));
+          } else if (!range.collapsed) {
+            const mark = document.createElement('mark');
+            mark.setAttribute('data-reader-highlight', '');
+            try {
+              range.surroundContents(mark);
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
+    /* --- composer ---------------------------------------------------------- */
+    function openComposer(sel) {
+      if (!sel || composer) return;
+      const el = document.createElement('div');
+      el.className =
+        'fixed inset-x-3 bottom-3 z-50 mx-auto max-w-lg border border-rule-strong bg-surface p-4 sm:inset-x-auto sm:right-6 sm:bottom-6 sm:left-auto sm:mx-0';
+      el.setAttribute('role', 'dialog');
+      el.setAttribute('aria-label', 'Leave a note');
+      el.innerHTML = `
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="meta">Attached to</p>
+            <p class="mt-1 line-clamp-2 border-l-2 border-accent pl-2 text-[0.8125rem] leading-snug text-ink-2 italic" data-quote></p>
+          </div>
+          <button type="button" class="meta shrink-0 px-1 text-ink-3 hover:text-ink" data-close aria-label="Close">✕</button>
+        </div>
+        <form class="mt-3">
+          <label class="meta" for="note-kind">What kind of note?</label>
+          <div class="mt-1.5 flex flex-wrap gap-1" data-kinds></div>
+          <p class="mt-1.5 text-[0.75rem] leading-snug text-ink-3" data-kind-hint></p>
+          <label class="meta mt-3 block" for="note-body">Your note</label>
+          <p class="mt-1.5 text-[0.75rem] leading-snug text-ink-3" data-empty>Empty for now. The notes that survive on a post are the ones that would be worth reading on their own — a number, a case, or the sentence you think is wrong.</p>
+          <textarea id="note-body" rows="4" maxlength="4000" placeholder="Be specific. The best notes here are the ones that would be worth reading on their own." class="mt-1.5 w-full resize-y border border-rule bg-paper px-3 py-2 text-[0.9375rem] leading-relaxed focus:border-accent focus:outline-none"></textarea>
+          <p class="mt-2 hidden border border-danger px-3 py-2 text-[0.8125rem] text-danger" data-error role="alert"></p>
+          <div class="mt-3 flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-[0.75rem] leading-snug text-ink-3">${signedInAs ? `Posting as ${signedInAs}.` : 'Posting anonymously. You can claim these notes later.'}</p>
+              <label class="mt-1.5 flex cursor-pointer items-center gap-2 text-[0.75rem] text-ink-3">
+                <input type="checkbox" class="h-3.5 w-3.5 accent-[var(--accent)]" data-private> Only I can see this
+              </label>
+            </div>
+            <button type="submit" class="shrink-0 border border-ink bg-ink px-3 py-1.5 text-[0.875rem] text-paper transition-colors hover:border-accent hover:bg-accent disabled:cursor-not-allowed disabled:border-rule disabled:bg-transparent disabled:text-ink-3">Post note</button>
+          </div>
+        </form>`;
+      el.querySelector('[data-quote]').textContent = sel.quote;
+      el.querySelector('[data-close]').addEventListener('click', clear);
+      document.body.appendChild(el);
+      composer = el;
+      selection = null;
+      affordance.classList.add('hidden');
+      if (hint) hint.classList.add('hidden');
+
+      const kindsEl = el.querySelector('[data-kinds]');
+      const kindHintEl = el.querySelector('[data-kind-hint]');
+      const renderKinds = () => {
+        kindsEl.innerHTML = '';
+        for (const k of KINDS) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = k.label;
+          b.setAttribute('aria-pressed', k.value === kind ? 'true' : 'false');
+          b.className =
+            'border px-2 py-1 text-[0.75rem] transition-colors ' +
+            (k.value === kind ? 'border-accent text-accent' : 'border-rule text-ink-3 hover:border-rule-strong hover:text-ink');
+          b.addEventListener('click', () => {
+            kind = k.value;
+            renderKinds();
+            kindHintEl.textContent = k.hint;
+          });
+          kindsEl.appendChild(b);
+        }
+      };
+      renderKinds();
+      kindHintEl.textContent = KINDS[0].hint;
+
+      const textarea = el.querySelector('textarea');
+      const submit = el.querySelector('button[type=submit]');
+      const errorEl = el.querySelector('[data-error]');
+      const emptyEl = el.querySelector('[data-empty]');
+      textarea.addEventListener('input', () => {
+        const has = textarea.value.trim().length > 0;
+        submit.disabled = !has;
+        emptyEl.classList.toggle('hidden', has);
+      });
+      submit.disabled = true;
+      requestAnimationFrame(() => textarea.focus());
+
+      el.querySelector('form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = textarea.value.trim();
+        if (!body) return;
+        submit.disabled = true;
+        submit.textContent = 'Saving…';
+        errorEl.classList.add('hidden');
+        try {
+          const res = await fetch('/api/annotations', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              postId,
+              versionId,
+              blockId: sel.blockId,
+              quote: sel.quote,
+              prefixHint: sel.prefixHint,
+              suffixHint: sel.suffixHint,
+              kind,
+              body,
+              isPrivate: el.querySelector('[data-private]').checked,
+            }),
+          });
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok || !json.id) {
+            errorEl.textContent = json.error ?? 'Could not save that note.';
+            errorEl.classList.remove('hidden');
+            submit.disabled = false;
+            submit.textContent = 'Post note';
+            return;
+          }
+          insertLocally(json.id, sel.blockId, sel.quote, body, kind);
+          // Leave the panel open briefly so the reader sees their note land,
+          // then dismiss. Dismissing instantly reads as the note being swallowed.
+          setTimeout(clear, 700);
+        } catch {
+          errorEl.textContent = 'Network error. Your note was not saved.';
+          errorEl.classList.remove('hidden');
+          submit.disabled = false;
+          submit.textContent = 'Post note';
+        }
+      });
+    }
+
+    /* --- optimistic insert -------------------------------------------------- */
+    function insertLocally(id, blockId, quote, body, _kind) {
+      if (!blockId) return;
+      const block = document.querySelector(`[data-block-id="${CSS.escape(blockId)}"]`);
+      if (!block) return;
+      let rail = block.querySelector('.block-notes');
+      if (!rail) {
+        rail = document.createElement('div');
+        rail.className = 'block-notes';
+        rail.setAttribute('data-notes-for', blockId);
+        block.appendChild(rail);
+      }
+      const count = rail.querySelector('.meta');
+      if (count) count.textContent = '1 note';
+      const label = KINDS.find((k) => k.value === kind)?.label ?? 'Comment';
+      rail.insertAdjacentHTML(
+        'afterbegin',
+        `<article class="border-b border-rule py-3" data-note-id="${id}">
+           <p class="meta note-kind-${kind}">${label}</p>
+           <blockquote class="mt-1.5 border-l-2 border-rule-strong pl-2 text-[0.8125rem] leading-snug text-ink-3 italic"></blockquote>
+           <p class="mt-1.5 text-[0.875rem] leading-relaxed text-ink-2"></p>
+           <p class="meta mt-1.5">${signedInAs ?? 'Anonymous'} · just now</p>
+         </article>`,
+      );
+      const article = rail.querySelector('[data-note-id]');
+      if (article) {
+        article.querySelector('blockquote').textContent = quote;
+        article.querySelectorAll('p')[1].textContent = body;
+      }
+    }
+
+    // Wire the affordance buttons. The note button hands its captured selection
+    // to the composer; the highlight button consumes it in place.
+    affordance.querySelector('[data-marginalia-note]').addEventListener('click', () => {
+      const sel = selection;
+      if (sel) openComposer(sel);
+    });
+    affordance.querySelector('[data-marginalia-highlight]').addEventListener('click', highlightSelection);
+  })();
+</script>

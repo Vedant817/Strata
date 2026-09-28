@@ -2,8 +2,8 @@
 import Base from '../../layouts/Base.astro';
 import Prose from '../../components/Prose.astro';
 import StatusBadge from '../../components/StatusBadge.astro';
-import DepthDial from '../../components/islands/DepthDial';
-import Marginalia from '../../components/islands/Marginalia';
+import DepthDial from '../../components/DepthDial.astro';
+import Marginalia from '../../components/Marginalia.astro';
 import {
   getAdjacent,
   getLastReceipt,
@@ -346,7 +346,6 @@ const jsonLd = [
             </p>
           )}
           <DepthDial
-            client:idle
             initial={depth}
             minutes={minutes}
             hasUnderstand={hasUnderstand}
@@ -635,7 +634,6 @@ const jsonLd = [
     </div>
 
     <Marginalia
-      client:idle
       postId={post.id}
       versionId={view.current.id}
       canWriteAuthorNote={isPostAuthor}

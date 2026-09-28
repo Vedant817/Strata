@@ -13,7 +13,7 @@ import { renderInline, slugify } from '../lib/inline';
 import { renderWithHighlight } from '../lib/inline-diff';
 import type { AnnotationView } from '../lib/repo/annotations';
 import NoteCard from './NoteCard.astro';
-import Artifact from './islands/Artifact';
+import Artifact from './Artifact.astro';
 
 interface Props {
   blocks: Block[];
@@ -225,12 +225,7 @@ const segHtml = (segments: Array<{ type: string; html?: string; text: string }>)
             )}
 
             {block.type === 'interactive' && (
-              <Artifact
-                client:visible
-                component={block.component}
-                title={block.title}
-                props={block.props}
-              />
+              <Artifact component={block.component} title={block.title} props={block.props} />
             )}
           </div>
 

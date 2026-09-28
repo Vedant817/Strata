@@ -166,20 +166,23 @@ keyboard reachable · screen-reader label.
 ### 2.5 Performance budget (enforced in CI, Lighthouse gate)
 
 Target: article page **< 100KB** total JS, **< 15KB** critical CSS. LCP < 1.5s on 4G, CLS < 0.02,
-INP < 200ms. Every island lazy-hydrates. The article renders and is readable with **JS disabled** — the
-depth slider, marginalia rail, and Ask panel are progressive enhancements layered on an already-complete
-document.
+INP < 200ms. The article renders and is readable with **JS disabled** — the depth slider, marginalia
+rail, and Ask panel are progressive enhancements layered on an already-complete document.
 
-**The target is not met, and the reason should be written down rather than absorbed.** The build ships
-**237KB** of client JS, of which **208KB is React DOM** — carried to the reader so that selecting a
-sentence and leaving a note works without a reload. The enforced budget (`npm run perf:budget`, which
-fails the build) is currently set at 280KB, i.e. it *protects the current state rather than the target*.
-That is a deliberate, recorded decision to ship, not an oversight.
+**The target is met, and it is met by deleting the framework rather than by shrinking it.** The article
+page now ships **zero external client JS**. The three islands (Marginalia, the depth dial, the artifact
+figures) were rewritten as plain DOM, and the `@astrojs/react` integration is removed from the build
+entirely. What remains is a few hundred bytes of inline script — a selection listener, a form post, a
+line that moves when the reader drags a slider — inlined into the HTML, so there is not even a second
+request to make.
 
-The honest options are: (a) convert Marginalia and DepthDial to plain DOM and script, which should land
-total JS well under 40KB and is the only way to actually meet this section, or (b) revise the target and
-say why a framework runtime is worth 208KB on a reading product. Either is defensible; leaving the
-number in a file nobody reads is not.
+The honest accounting of why this was worth doing: React DOM cost 208KB to re-render a textarea and
+move one `<line>` in an SVG. Marginalia was never doing layout that needed a framework — it moved a
+handful of DOM nodes and posted a form — and the artifact figures were pure arithmetic over author
+data, computed once on the server. Shipping a runtime for that was paying 208KB to reimplement
+`addEventListener`. The enforced budget (`npm run perf:budget`, which fails the build) is now a
+tripwire at 40KB rather than a ceiling, so reintroducing a framework — or any real dependency — lands a
+multi-hundred-kilobyte chunk and fails immediately.
 
 ---
 
@@ -474,9 +477,10 @@ product, because it makes the "fully readable with JS disabled" budget structura
 
 - **Astro 4 → current**, `output: 'server'`, **`@astrojs/node`** standalone adapter (portable; deploy
   target-agnostic). Cloudflare/Vercel are a config swap, not a rewrite.
-- **Islands:** React for the interactive surface only (depth dial, marginalia rail, artifact). Everything
-  else is static Astro — including the note interactions, which are ordinary form posts specifically so
-  they work with JavaScript off. Budget: ≤6 islands on an article page.
+- **No client framework.** The interactive surface (depth dial, marginalia rail, artifact figures) is
+  plain DOM and a few hundred bytes of inline script, and `@astrojs/react` is removed from the build.
+  Everything else is static Astro — including the note interactions, which are ordinary form posts
+  specifically so they work with JavaScript off. Result: **0KB external client JS** on the article page.
 - **DB + auth:** the plan called for **Supabase** — Postgres, Auth, Realtime, Edge Functions. The build
   uses **SQLite via libsql** instead, with handle-claim tokens rather than magic links. This is a
   deliberate deviation, and it has costs worth recording: no RLS, so tenancy rules live in application

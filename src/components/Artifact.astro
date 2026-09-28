@@ -1,0 +1,316 @@
+---
+/**
+ * Author-authored explorable artifacts, drawn server-side.
+ *
+ * These are the read side of "explorable explanations" (PLAN.md §4.4): a
+ * parameter the reader can move to stress-test the author's claim. Hand-drawn
+ * SVG rather than a charting library — no gradients, no hover-only tooltips,
+ * every series labelled in type rather than colour.
+ *
+ * Plain Astro, not a React island. The figure is arithmetic over author data,
+ * so it is computed on the server and the SVG is in the HTML. Only the two
+ * figures that are genuinely interactive (a slider, a clickable marker) ship
+ * a few lines of script, and that script only moves an existing line and
+ * rewrites existing text — it never re-renders. The page therefore pays no
+ * framework runtime to draw a chart.
+ */
+import {
+  breakdownData,
+  curveData,
+  matrixCases,
+  timelineEvents,
+  type Case,
+} from '../lib/artifact';
+
+interface Props {
+  component: string;
+  title?: string;
+  props: Record<string, unknown>;
+}
+
+const { component, title, props } = Astro.props as Props;
+
+const W = 560;
+
+// -- Curve geometry (shared with the tiny client script) ---------------------
+const W_CURVE = 560;
+const H_CURVE = 220;
+const PAD_C = { l: 52, r: 14, t: 12, b: 28 };
+const cx = (c: ReturnType<typeof curveData>, v: number) =>
+  PAD_C.l + ((v - c.min) / (c.max - c.min || 1)) * (W_CURVE - PAD_C.l - PAD_C.r);
+const cy = (y: number) => H_CURVE - PAD_C.b - y * (H_CURVE - PAD_C.t - PAD_C.b);
+
+const curve = component === 'curve' ? curveData(props) : null;
+const curvePath =
+  curve && curve.ok
+    ? curve.series.map((p, i) => `${i === 0 ? 'M' : 'L'}${cx(curve, p.x).toFixed(1)},${cy(p.y).toFixed(1)}`).join(' ')
+    : '';
+const curveY = (y: number) => cy(y);
+const curvePx = (v: number) => cx(curve!, v);
+const curveSummary = (() => {
+  if (!curve || !curve.ok) return '';
+  const base = curve.series[0]!.raw;
+  const first = curve.series.find((p) => p.x >= curve.firstX) ?? curve.series[0]!;
+  const gain = first.raw - base;
+  return curve.isRecall
+    ? `${(first.raw * 100).toFixed(1)}% recall at ${Math.round(first.x)} dimensions — ${gain >= 0 ? '+' : ''}${(gain * 100).toFixed(1)} points over the ${Math.round(curve.min)}-dimension baseline.`
+    : `${(first.raw * 100).toFixed(0)}% of reads can be served stale at a ${first.x.toFixed(first.x < 10 ? 1 : 0)}${curve.unit} TTL.`;
+})();
+
+// -- Breakdown --------------------------------------------------------------
+const bd = component === 'breakdown' ? breakdownData(props) : null;
+const bdW = 560;
+const bdMax = bd?.ok ? Math.max(bd.naive, ...bd.scenarios.map((s) => s.p99)) : 1;
+const bdBar = (v: number) => (v / (bdMax || 1)) * (bdW - 44 - 12);
+
+// -- Matrix -----------------------------------------------------------------
+const matrix = component === 'matrix' ? matrixCases(props) : null;
+const mH = 300;
+const mPad = { l: 52, r: 16, t: 16, b: 40 };
+const mx = (v: number) => mPad.l + v * (W - mPad.l - mPad.r);
+const my = (v: number) => mH - mPad.b - v * (mH - mPad.t - mPad.b);
+const activeCase: Case | undefined = matrix && matrix.length > 0 ? matrix[0]! : undefined;
+
+// -- Timeline ---------------------------------------------------------------
+const timeline = component === 'timeline' ? timelineEvents(props) : [];
+
+const isEmpty =
+  (component === 'curve' && !curve?.ok) ||
+  (component === 'breakdown' && !bd?.ok) ||
+  (component === 'matrix' && matrix!.length === 0) ||
+  (component === 'timeline' && timeline.length === 0);
+const emptyWhat =
+  component === 'curve'
+    ? 'the measured series'
+    : component === 'breakdown'
+      ? 'the hop data'
+      : component === 'matrix'
+        ? 'the case list'
+        : 'the timeline';
+const known = ['curve', 'breakdown', 'matrix', 'timeline'].includes(component);
+---
+
+{
+  !known ? (
+    <p class="border border-danger p-4 text-[0.9375rem] text-danger" role="alert">
+      This figure could not be drawn: unknown artifact "{String(component)}"
+    </p>
+  ) : isEmpty ? (
+    <p class="border border-dashed border-rule-strong p-6 text-center text-[0.9375rem] text-ink-3">
+      This figure has no data yet — {emptyWhat} is empty.
+    </p>
+  ) : (
+    <figure class="my-8 border border-rule bg-surface" data-artifact={component}>
+      {title && <figcaption class="meta border-b border-rule px-4 py-2.5">{title}</figcaption>}
+      <div class="p-4">
+        {component === 'curve' && curve && (
+          <div data-curve data-min={curve.min} data-max={curve.max} data-unit={curve.unit} data-recall={String(curve.isRecall)}>
+            <script is:inline type="application/json" data-curve-series set:html={JSON.stringify(curve.seriesForClient)} />
+            <svg viewBox={`0 0 ${W_CURVE} ${H_CURVE}`} class="w-full" role="img" aria-label={curveSummary}>
+              {(curve.isRecall
+                ? [
+                    { y: 0, label: `${(Math.min(...(props.measured as number[] ?? [])) * 100).toFixed(0)}%` },
+                    { y: 0.5, label: '50%' },
+                    { y: 1, label: `${(Math.max(...(props.measured as number[] ?? [])) * 100).toFixed(0)}%` },
+                  ]
+                : [
+                    { y: 0, label: '0%' },
+                    { y: 0.25, label: '25%' },
+                    { y: 0.5, label: '50%' },
+                    { y: 0.75, label: '75%' },
+                    { y: 1, label: '100%' },
+                  ]
+              ).map((t) => (
+                <g>
+                  <line x1={PAD_C.l} x2={W_CURVE - PAD_C.r} y1={curveY(t.y)} y2={curveY(t.y)} stroke="var(--rule)" stroke-width="1" />
+                  <text x={PAD_C.l - 8} y={curveY(t.y) + 4} text-anchor="end" font-size="10" fill="var(--ink-3)" font-family="var(--font-mono)">{t.label}</text>
+                </g>
+              ))}
+              <path d={curvePath} fill="none" stroke="var(--accent)" stroke-width="1.75" />
+              <line data-cursor-line x1={curvePx(curve.firstX)} x2={curvePx(curve.firstX)} y1={PAD_C.t} y2={H_CURVE - PAD_C.b} stroke="var(--rule-strong)" stroke-width="1" />
+              <circle data-cursor-dot cx={curvePx(curve.firstX)} cy={curveY(curve.series.find((p) => p.x >= curve.firstX)?.y ?? 0)} r="3.5" fill="var(--accent)" />
+              <text x={PAD_C.l} y={H_CURVE - 8} font-size="10" fill="var(--ink-3)" font-family="var(--font-mono)">{Math.round(curve.min)}</text>
+              <text x={W_CURVE - PAD_C.r} y={H_CURVE - 8} text-anchor="end" font-size="10" fill="var(--ink-3)" font-family="var(--font-mono)">{Math.round(curve.max)}{curve.isRecall ? '' : curve.unit}</text>
+            </svg>
+            <div class="mt-4 flex flex-wrap items-center gap-4 border-t border-rule pt-4">
+              <label class="flex flex-1 items-center gap-3">
+                <span class="meta shrink-0">{curve.isRecall ? 'Width' : 'TTL'}</span>
+                <input type="range" min={curve.min} max={curve.max} step={(curve.max - curve.min) / 200} value={curve.firstX} data-curve-range class="w-full accent-[var(--accent)]" aria-label={curve.isRecall ? 'Embedding width' : 'Cache TTL'} />
+                <span class="meta w-16 shrink-0 text-right tabular-nums" data-curve-value>{Math.round(curve.firstX)}{curve.isRecall ? 'd' : curve.unit}</span>
+              </label>
+              <p class="max-w-sm text-[0.9375rem] text-ink-2" data-curve-summary>{curveSummary}</p>
+            </div>
+          </div>
+        )}
+
+        {component === 'breakdown' && bd?.ok && (
+          <div>
+            <svg viewBox={`0 0 ${bdW} ${bd.perHop.length * 30 + bd.scenarios.length * 34 + 46}`} class="w-full" role="img" aria-label={`Naive sum of per-hop p99s is ${bd.naive.toFixed(0)} milliseconds. The measured p99 of the whole request ranges from ${Math.min(...bd.scenarios.map((s) => s.p99)).toFixed(0)} to ${Math.max(...bd.scenarios.map((s) => s.p99)).toFixed(0)} milliseconds depending on correlation.`}>
+              {bd.perHop.map((s, i) => (
+                <g>
+                  <text x="0" y={i * 30 + 14} font-size="11" fill="var(--ink-2)" font-family="var(--font-mono)">{s.name}</text>
+                  <rect x={44} y={i * 30 + 4} width={bdBar(s.p99)} height="10" fill="var(--rule-strong)" />
+                  <text x={44 + bdBar(s.p99) + 6} y={i * 30 + 13} font-size="10" fill="var(--ink-3)" font-family="var(--font-mono)">p99 {s.p99.toFixed(0)} · p50 {s.p50.toFixed(0)}</text>
+                </g>
+              ))}
+              <line x1={44} x2={44 + bdBar(bd.naive)} y1={bd.perHop.length * 30 - 4} y2={bd.perHop.length * 30 - 4} stroke="var(--danger)" stroke-width="2" />
+              <text x={44} y={bd.perHop.length * 30 + 10} font-size="10" fill="var(--danger)" font-family="var(--font-mono)">sum of per-hop p99s — the number you would report: {bd.naive.toFixed(0)}ms</text>
+              {bd.scenarios.map((s, i) => {
+                const y = bd.perHop.length * 30 + 26 + i * 34;
+                const over = s.p99 - bd.naive;
+                return (
+                  <g>
+                    <text x="0" y={y + 12} font-size="10" fill="var(--ink-2)" font-family="var(--font-mono)">{s.label}</text>
+                    <rect x={44} y={y + 3} width={bdBar(s.p99)} height="9" fill="var(--accent)" />
+                    <text x={44 + bdBar(s.p99) + 6} y={y + 12} font-size="10" fill="var(--ink-2)" font-family="var(--font-mono)">{s.p99.toFixed(0)}ms ({over >= 0 ? '+' : ''}{over.toFixed(0)})</text>
+                  </g>
+                );
+              })}
+            </svg>
+            <p class="mt-3 border-t border-rule pt-3 text-[0.9375rem] text-ink-2">
+              The naive sum is <strong class="font-medium text-ink">{bd.naive.toFixed(0)}ms</strong>. The real number is somewhere between{' '}
+              <strong class="font-medium text-ink">{Math.min(...bd.scenarios.map((s) => s.p99)).toFixed(0)}ms</strong> and{' '}
+              <strong class="font-medium text-ink">{Math.max(...bd.scenarios.map((s) => s.p99)).toFixed(0)}ms</strong>, and which end you get depends on whether your hops fail together. You cannot read that off the component dashboards.
+            </p>
+            <p class="sr-only">20,000 simulated requests, lognormal per hop. The honest answer depends entirely on how correlated the hops are.</p>
+          </div>
+        )}
+
+        {component === 'matrix' && matrix && matrix.length > 0 && activeCase && (
+          <div data-matrix>
+            <script is:inline type="application/json" data-matrix-cases set:html={JSON.stringify(matrix)} />
+            <svg viewBox={`0 0 ${W} ${mH}`} class="w-full" role="img" aria-label={`Diagnostic matrix. Selected: ${activeCase.name}, ${activeCase.verdict}`}>
+              {[0, 0.25, 0.5, 0.75, 1].map((t) => (
+                <g>
+                  <line x1={mx(t)} x2={mx(t)} y1={mPad.t} y2={mH - mPad.b} stroke="var(--rule)" stroke-width="1" />
+                  <line x1={mPad.l} x2={W - mPad.r} y1={my(t)} y2={my(t)} stroke="var(--rule)" stroke-width="1" />
+                </g>
+              ))}
+              {matrix.map((c, idx) => (
+                <g data-case={idx} class="cursor-pointer" role="button" tabindex="0" aria-label={`${c.name}: ${c.verdict}`}>
+                  <circle cx={mx(c.recall)} cy={my(c.precision)} r={idx === 0 ? 7 : 5} fill={idx === 0 ? 'var(--accent)' : 'none'} stroke="var(--accent)" stroke-width="1.5" />
+                  <text x={mx(c.recall) + 11} y={my(c.precision) + 4} font-size="10" fill="var(--ink-2)" font-family="var(--font-mono)">{c.name}</text>
+                </g>
+              ))}
+              <text x={W / 2} y={mH - 10} text-anchor="middle" font-size="10" fill="var(--ink-3)" font-family="var(--font-mono)">recall@10 →</text>
+              <text x="14" y={mH / 2} text-anchor="middle" font-size="10" fill="var(--ink-3)" font-family="var(--font-mono)" transform={`rotate(-90 14 ${mH / 2})`}>context precision →</text>
+            </svg>
+            <div class="mt-3 border-t border-rule pt-3" data-matrix-detail>
+              <p class="meta mb-1" data-matrix-name>{activeCase.name}</p>
+              <p class="text-[0.9375rem] text-ink"><strong class="font-medium" data-matrix-verdict>{activeCase.verdict}</strong></p>
+              <p class="meta mt-1 tabular-nums" data-matrix-numbers>recall {activeCase.recall.toFixed(2)} · precision {activeCase.precision.toFixed(2)} · groundedness {activeCase.grounded.toFixed(2)}</p>
+            </div>
+          </div>
+        )}
+
+        {component === 'timeline' && timeline.length > 0 && (
+          <ol class="relative space-y-4 border-l border-rule pl-5">
+            {timeline.map((e) => (
+              <li class="relative">
+                <span class="absolute -left-[1.4375rem] top-1.5 h-1.5 w-1.5 bg-accent" aria-hidden="true" />
+                <p class="meta">{e.at}</p>
+                <p class="text-[0.9375rem] text-ink">{e.label}</p>
+                {e.note && <p class="text-[0.9375rem] text-ink-2">{e.note}</p>}
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+      {component === 'curve' && curve?.note && <p class="meta border-t border-rule px-4 py-2.5 leading-relaxed">{curve.note}</p>}
+      {component === 'breakdown' && bd?.ok && <p class="meta border-t border-rule px-4 py-2.5 leading-relaxed">20,000 simulated requests, lognormal per hop. The honest answer depends entirely on how correlated the hops are — which you cannot see from the component numbers.</p>}
+      {component === 'matrix' && <p class="meta border-t border-rule px-4 py-2.5 leading-relaxed">Recall on the horizontal axis, context precision on the vertical. Click a marker.</p>}
+    </figure>
+  )
+}
+
+<script>
+  /* Curve: move the cursor. Matrix: select a marker. Both only reposition
+     existing SVG nodes and rewrite existing text — no framework, no
+     re-render. A few hundred bytes each instead of a chart runtime. */
+
+  // Curve slider
+  for (const host of document.querySelectorAll<HTMLElement>('[data-curve]')) {
+    const seriesJson = host.querySelector('script[data-curve-series]')?.textContent ?? '[]';
+    const flat: number[] = JSON.parse(seriesJson);
+    const series: Array<{ x: number; raw: number; y: number }> = [];
+    for (let i = 0; i < flat.length; i += 3) series.push({ x: flat[i], raw: flat[i + 1], y: flat[i + 2] });
+    const range = host.querySelector<HTMLInputElement>('[data-curve-range]')!;
+    const line = host.querySelector('[data-cursor-line]') as unknown as SVGLineElement;
+    const dot = host.querySelector('[data-cursor-dot]') as unknown as SVGCircleElement;
+    const valueEl = host.querySelector('[data-curve-value]')!;
+    const summaryEl = host.querySelector('[data-curve-summary]')!;
+    const svg = host.querySelector('svg') as unknown as SVGSVGElement;
+    const min = Number(host.dataset.min);
+    const max = Number(host.dataset.max);
+    const unit = host.dataset.unit ?? 's';
+    const isRecall = host.dataset.recall === 'true';
+    const W = 560, H = 220, PAD = { l: 52, r: 14, t: 12, b: 28 };
+    const X = (v: number) => PAD.l + ((v - min) / (max - min || 1)) * (W - PAD.l - PAD.r);
+    const Y = (y: number) => H - PAD.b - y * (H - PAD.t - PAD.b);
+    const valueAt = (target: number) => {
+      if (series.length === 1) return series[0]!;
+      let lo = series[0]!;
+      let hi = series[series.length - 1]!;
+      for (let i = 0; i < series.length - 1; i++) {
+        if (series[i]!.x <= target && series[i + 1]!.x >= target) {
+          lo = series[i]!;
+          hi = series[i + 1]!;
+          break;
+        }
+      }
+      const span = hi.x - lo.x || 1;
+      const t = (target - lo.x) / span;
+      return { x: target, raw: lo.raw + (hi.raw - lo.raw) * t, y: lo.y + (hi.y - lo.y) * t };
+    };
+    const baseline = series.length ? series[0]!.raw : 0;
+    const paint = () => {
+      const target = Number(range.value);
+      const cur = valueAt(target);
+      line.setAttribute('x1', String(X(cur.x)));
+      line.setAttribute('x2', String(X(cur.x)));
+      dot.setAttribute('cx', String(X(cur.x)));
+      dot.setAttribute('cy', String(Y(cur.y)));
+      valueEl.textContent = `${Math.round(cur.x)}${isRecall ? 'd' : unit}`;
+      const gain = cur.raw - baseline;
+      summaryEl.textContent = isRecall
+        ? `${(cur.raw * 100).toFixed(1)}% recall at ${Math.round(cur.x)} dimensions — ${gain >= 0 ? '+' : ''}${(gain * 100).toFixed(1)} points over the ${Math.round(min)}-dimension baseline.`
+        : `${(cur.raw * 100).toFixed(0)}% of reads can be served stale at a ${cur.x.toFixed(cur.x < 10 ? 1 : 0)}${unit} TTL.`;
+      svg.setAttribute('aria-label', summaryEl.textContent ?? '');
+    };
+    range.addEventListener('input', paint);
+    paint();
+  }
+
+  // Matrix marker selection
+  for (const host of document.querySelectorAll<HTMLElement>('[data-matrix]')) {
+    const casesJson = host.querySelector('script[data-matrix-cases]')?.textContent ?? '[]';
+    const cases: Array<{ name: string; recall: number; precision: number; grounded: number; verdict: string }> = JSON.parse(casesJson);
+    const nameEl = host.querySelector('[data-matrix-name]')!;
+    const verdictEl = host.querySelector('[data-matrix-verdict]')!;
+    const numbersEl = host.querySelector('[data-matrix-numbers]')!;
+    const select = (idx: number) => {
+      const c = cases[idx];
+      if (!c) return;
+      host.querySelectorAll<SVGGElement>('[data-case]').forEach((g) => {
+        const on = Number(g.dataset.case) === idx;
+        const circle = g.querySelector('circle')!;
+        circle.setAttribute('r', on ? '7' : '5');
+        circle.setAttribute('fill', on ? 'var(--accent)' : 'none');
+      });
+      nameEl.textContent = c.name;
+      verdictEl.textContent = c.verdict;
+      numbersEl.textContent = `recall ${c.recall.toFixed(2)} · precision ${c.precision.toFixed(2)} · groundedness ${c.grounded.toFixed(2)}`;
+    };
+    host.querySelectorAll<SVGGElement>('[data-case]').forEach((g) => {
+      const idx = Number(g.dataset.case);
+      g.addEventListener('click', () => select(idx));
+      g.addEventListener('keydown', (e) => {
+        const ke = e as KeyboardEvent;
+        if (ke.key === 'Enter' || ke.key === ' ') {
+          ke.preventDefault();
+          select(idx);
+        }
+      });
+    });
+  }
+</script>

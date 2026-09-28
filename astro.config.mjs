@@ -1,7 +1,6 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import node from '@astrojs/node';
-import react from '@astrojs/react';
 import sitemap from '@astrojs/sitemap';
 import tailwindcss from '@tailwindcss/vite';
 
@@ -13,7 +12,10 @@ export default defineConfig({
   adapter: node({ mode: 'standalone' }),
   trailingSlash: 'ignore',
   integrations: [
-    react(),
+    // No React. The last island was Marginalia; it and the other two
+    // interactive surfaces (the depth dial, the artifact figures) are now plain
+    // DOM, because shipping a framework runtime to re-render a textarea and move
+    // an SVG line cost more than every other script on the page combined.
     sitemap({
       filter: (page) => !page.includes('/studio') && !page.includes('/api/'),
     }),

@@ -1,0 +1,106 @@
+---
+/**
+ * The depth dial.
+ *
+ * Plain DOM, no framework. The article renders server-side at the reader's
+ * stored depth, so all this needs to do is flip an attribute on an element it
+ * does not own and set a cookie. It deliberately does not re-render the
+ * article through anything — the prose is not a JS tree, and making it one
+ * would cost the reader the whole point of HTML-first, and ship a framework
+ * runtime to do it.
+ */
+type Depth = 'skim' | 'understand' | 'master';
+
+interface Props {
+  initial: Depth;
+  minutes: Record<string, number>;
+  hasUnderstand: boolean;
+  hasMaster: boolean;
+}
+
+const { initial, minutes, hasUnderstand, hasMaster } = Astro.props;
+
+const OPTIONS: Array<{ value: Depth; label: string; hint: string }> = [
+  { value: 'skim', label: 'Skim', hint: 'The argument only.' },
+  { value: 'understand', label: 'Read', hint: 'Full argument, prerequisites explained inline.' },
+  { value: 'master', label: 'Study', hint: 'Everything — footnotes, citations, author notes.' },
+];
+
+const available = OPTIONS.filter((o) => {
+  if (o.value === 'understand' && !hasUnderstand) return false;
+  if (o.value === 'master' && !hasMaster) return false;
+  return true;
+});
+const active = available.find((o) => o.value === initial) ?? available[0]!;
+---
+
+{
+  // A one-button control is not a control. If the post has nothing deeper to
+  // offer, say what it costs to read and get out of the way.
+  available.length < 2 ? (
+    <div class="flex items-baseline justify-between gap-4 border border-rule bg-surface px-4 py-3">
+      <p class="text-[0.9375rem] text-ink-2">{active.hint}</p>
+      <p class="meta shrink-0 tabular-nums">{minutes[active.value] ? `${minutes[active.value]} min` : ''}</p>
+    </div>
+  ) : (
+    <div class="border border-rule bg-surface" data-depth-dial>
+      <div class="flex items-stretch" role="group" aria-label="Reading depth">
+        {available.map((o) => {
+          const on = o.value === initial;
+          const mins = minutes[o.value] ?? 0;
+          return (
+            <button
+              type="button"
+              data-depth={o.value}
+              data-hint={o.hint}
+              aria-pressed={on ? 'true' : 'false'}
+              class:list={[
+                'flex-1 border-r border-rule px-2 py-2 text-left transition-colors last:border-r-0',
+                on ? 'bg-ink text-paper' : 'text-ink-2 hover:bg-sunken hover:text-ink',
+              ]}
+            >
+              <span class="block font-sans text-[0.9375rem] leading-tight font-medium">{o.label}</span>
+              <span class:list={['meta block leading-tight tabular-nums', on ? 'text-paper/70' : 'text-ink-3']}>
+                {mins > 0 ? `${mins} min` : '—'}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <p class="border-t border-rule px-3 py-1.5 text-[0.8125rem] leading-snug text-ink-3" data-depth-hint>
+        {active.hint}
+      </p>
+    </div>
+  )
+}
+
+<script>
+  // Keep the server-rendered article in sync without re-rendering it.
+  const dial = document.querySelector('[data-depth-dial]');
+  if (dial) {
+    dial.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-depth]');
+      if (!btn) return;
+      const value = btn.dataset.depth!;
+      const host = document.querySelector('[data-depth-host]');
+      if (host) host.setAttribute('data-depth', value);
+      document.cookie = `strata_depth=${value};path=/;max-age=${60 * 60 * 24 * 365};samesite=lax`;
+      dial.querySelectorAll('button[data-depth]').forEach((b) => {
+        const on = b === btn;
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        b.classList.toggle('bg-ink', on);
+        b.classList.toggle('text-paper', on);
+        b.classList.toggle('text-ink-2', !on);
+        b.classList.toggle('hover:bg-sunken', !on);
+        b.classList.toggle('hover:text-ink', !on);
+        const meta = b.querySelector('.meta');
+        if (meta) {
+          meta.classList.toggle('text-paper/70', on);
+          meta.classList.toggle('text-ink-3', !on);
+        }
+      });
+      const hint = dial.querySelector('[data-depth-hint]');
+      if (hint && btn.dataset.hint) hint.textContent = btn.dataset.hint;
+    });
+  }
+</script>

@@ -11,18 +11,24 @@
  * It reads the build output rather than driving a browser, so it is
  * deterministic and needs no server. Numbers are raw bytes, before gzip: the
  * point is to catch a dependency that lands, not to model a CDN.
+ *
+ * Since the last island was removed, there is *no external client JS at all* —
+ * the reading path's interactivity is inlined into the HTML. The budget is now
+ * a tripwire for that staying true: reintroducing a framework, or even a heavy
+ * library, puts a multi-hundred-kilobyte chunk here and fails immediately.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 
-const DIST = path.resolve(process.cwd(), 'dist/client/_astro');
+const DIST = path.resolve(process.cwd(), 'dist/client');
 
-/* Set just above today's build so ordinary work passes and a real regression
-   does not. Current: 237.3 KB total JS, 207.9 KB largest, 35.5 KB CSS. */
+/* Deliberately far below the plan's <100KB target: the reading path ships no
+   external JS, so any real budget here is a regression guard. A framework
+   reintroduced by accident lands well over the largest cap and fails the build. */
 const BUDGET = {
-  totalJsKb: 280,
-  largestJsKb: 240,
+  totalJsKb: 40,
+  largestJsKb: 40,
   totalCssKb: 48,
 } as const;
 
@@ -30,10 +36,16 @@ const KB = 1024;
 
 function assets(ext: string) {
   if (!fs.existsSync(DIST)) return [];
-  return fs
-    .readdirSync(DIST)
-    .filter((f) => f.endsWith(ext))
-    .map((f) => ({ name: f, bytes: fs.statSync(path.join(DIST, f)).size }));
+  const out: Array<{ name: string; bytes: number }> = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(ext)) out.push({ name: entry.name, bytes: fs.statSync(full).size });
+    }
+  };
+  walk(DIST);
+  return out;
 }
 
 function kb(bytes: number) {
@@ -47,26 +59,30 @@ function row(label: string, bytes: number, limitKb: number) {
   return { mark, label, value: `${kb(bytes).toFixed(1)} KB`, cap: `${limitKb} KB`, ok };
 }
 
-const js = assets('.js');
-const css = assets('.css');
-
-if (js.length === 0) {
-  console.error('No client JS found in dist/client/_astro — run `npm run build` first.');
+if (!fs.existsSync(DIST)) {
+  console.error('No build output in dist/client — run `npm run build` first.');
   process.exit(1);
 }
 
+const js = assets('.js');
+const css = assets('.css');
+
 const totalJs = js.reduce((n, a) => n + a.bytes, 0);
-const largest = js.reduce((a, b) => (a.bytes > b.bytes ? a : b));
+const largest = js.length ? js.reduce((a, b) => (a.bytes > b.bytes ? a : b)) : null;
 const totalCss = css.reduce((n, a) => n + a.bytes, 0);
 
 const rows = [
   row('client JS, total', totalJs, BUDGET.totalJsKb),
-  row(`client JS, largest (${largest.name})`, largest.bytes, BUDGET.largestJsKb),
+  ...(largest ? [row(`client JS, largest (${largest.name})`, largest.bytes, BUDGET.largestJsKb)] : []),
   row('CSS, total', totalCss, BUDGET.totalCssKb),
 ];
+
 console.log('\nperformance budget\n');
 for (const r of rows) {
   console.log(`  ${r.mark}  ${r.label.padEnd(42)} ${r.value.padStart(10)}  / ${r.cap}`);
+}
+if (js.length === 0) {
+  console.log('\n  No external client JS — the reading path is HTML + inlined scripts only.');
 }
 
 const failed = rows.filter((r) => !r.ok);
@@ -77,7 +93,7 @@ if (failed.length > 0) {
   console.error(
     '\nA long-form reader should not pay for a framework to read a paragraph.\n' +
       'Before raising a limit, check whether the weight belongs on the reading\n' +
-      'path at all, or whether an island can be plain DOM instead.\n',
+      'path at all, or whether it can be plain DOM instead.\n',
   );
   process.exit(1);
 }
