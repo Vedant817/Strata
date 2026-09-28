@@ -11,6 +11,7 @@ import {
   users,
 } from '../db/schema';
 import type { Post } from '../db/schema';
+import { nanoid } from '../ids';
 
 const versionCount = sql<number>`(select count(*) from post_versions where post_versions.post_id = ${posts.id})`;
 const annotationTotal = sql<number>`(
@@ -130,6 +131,9 @@ export interface ListWithItems {
   title: string;
   description: string;
   ownerHandle: string;
+  ownerId: string;
+  isPublic: boolean;
+  hasShareLink: boolean;
   items: Array<{
     ordinal: number;
     note: string;
@@ -154,6 +158,9 @@ export async function listReadingLists(): Promise<ListWithItems[]> {
       title: readingLists.title,
       description: readingLists.description,
       ownerHandle: users.handle,
+      ownerId: readingLists.ownerId,
+      isPublic: readingLists.isPublic,
+      shareToken: readingLists.shareToken,
     })
     .from(readingLists)
     .innerJoin(users, eq(readingLists.ownerId, users.id))
@@ -193,9 +200,93 @@ export async function listReadingLists(): Promise<ListWithItems[]> {
         authorName: r.authorName,
       },
     }));
-    out.push({ ...list, items });
+    out.push({
+      ...list,
+      isPublic: Boolean(list.isPublic),
+      hasShareLink: Boolean(list.shareToken),
+      items,
+    });
   }
   return out;
+}
+
+/**
+ * One list, with access control.
+ *
+ * Public lists open to everyone. A private list opens to exactly two parties:
+ * its owner, and anyone holding the unguessable `?key=` link. Anything else
+ * gets null — and the page answers 404, because confirming that a private
+ * list *exists* would already leak that it does.
+ */export async function getAccessibleList(
+  slug: string,
+  viewerUserId: string | null,
+  key: string | null,
+): Promise<ListWithItems | null> {
+  const database = await readyDb();
+  const [row] = await database
+    .select({
+      id: readingLists.id,
+      slug: readingLists.slug,
+      title: readingLists.title,
+      description: readingLists.description,
+      ownerHandle: users.handle,
+      ownerId: readingLists.ownerId,
+      isPublic: readingLists.isPublic,
+      shareToken: readingLists.shareToken,
+    })
+    .from(readingLists)
+    .innerJoin(users, eq(readingLists.ownerId, users.id))
+    .where(eq(readingLists.slug, slug))
+    .limit(1);
+  if (!row) return null;
+
+  const allowed =
+    row.isPublic ||
+    (viewerUserId !== null && row.ownerId === viewerUserId) ||
+    (key !== null && key !== '' && row.shareToken !== null && key === row.shareToken);
+  if (!allowed) return null;
+
+  const itemRows = await database
+    .select({
+      ordinal: readingListItems.ordinal,
+      note: readingListItems.note,
+      slug: posts.slug,
+      title: posts.title,
+      dek: posts.dek,
+      status: posts.status,
+      publishedAt: posts.publishedAt,
+      readingMinutes,
+      authorName: users.displayName,
+    })
+    .from(readingListItems)
+    .innerJoin(posts, eq(readingListItems.postId, posts.id))
+    .innerJoin(users, eq(posts.authorId, users.id))
+    .where(eq(readingListItems.listId, row.id))
+    .orderBy(readingListItems.ordinal);
+
+  return {
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    description: row.description,
+    ownerHandle: row.ownerHandle,
+    ownerId: row.ownerId,
+    isPublic: Boolean(row.isPublic),
+    hasShareLink: Boolean(row.shareToken),
+    items: itemRows.map((r) => ({
+      ordinal: r.ordinal,
+      note: r.note,
+      post: {
+        slug: r.slug,
+        title: r.title,
+        dek: r.dek,
+        status: r.status,
+        publishedAt: r.publishedAt,
+        readingMinutes: Number(r.readingMinutes ?? 1),
+        authorName: r.authorName,
+      },
+    })),
+  };
 }
 
 export async function getReadingList(slug: string): Promise<ListWithItems | null> {
@@ -330,4 +421,184 @@ export async function getHalfLife(postId: string, months = 12) {
   const total = Number(rows[0]?.total ?? 0);
   const late = Number(rows[0]?.late ?? 0);
   return { total, late, share: total === 0 ? 0 : late / total };
+}
+
+/* -------------------------------------------------------------------------- */
+/* List management                                                             */
+/* -------------------------------------------------------------------------- */
+
+function listSlugify(title: string): string {
+  return (
+    title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) ||
+    'list'
+  );
+}
+
+export async function createReadingList(
+  ownerId: string,
+  title: string,
+  description: string,
+  isPublic: boolean,
+): Promise<{ ok: true; id: string; slug: string } | { ok: false; error: string }> {
+  const clean = title.trim().slice(0, 120);
+  if (clean.length < 3) return { ok: false, error: 'Name the list — at least three characters.' };
+  const database = await readyDb();
+  const slugBase = listSlugify(clean);
+  let slug = slugBase;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const existing = await database
+      .select({ id: readingLists.id })
+      .from(readingLists)
+      .where(eq(readingLists.slug, slug))
+      .limit(1);
+    if (existing.length === 0) break;
+    slug = `${slugBase}-${nanoid().slice(0, 6)}`;
+  }
+  const id = nanoid();
+  await database.insert(readingLists).values({
+    id,
+    ownerId,
+    slug,
+    title: clean,
+    description: description.trim().slice(0, 500),
+    isPublic,
+  });
+  return { ok: true, id, slug };
+}
+
+export async function setListVisibility(
+  listId: string,
+  ownerId: string,
+  isPublic: boolean,
+): Promise<boolean> {
+  const database = await readyDb();
+  const rows = await database
+    .update(readingLists)
+    .set({ isPublic })
+    .where(and(eq(readingLists.id, listId), eq(readingLists.ownerId, ownerId)))
+    .returning({ id: readingLists.id });
+  return rows.length > 0;
+}
+
+/** Issue (or rotate) the share link. Returns the full `?key=` URL path. */
+export async function rotateListShareToken(
+  listId: string,
+  ownerId: string,
+): Promise<string | null> {
+  const database = await readyDb();
+  const token = `${nanoid()}${nanoid()}`;
+  const rows = await database
+    .update(readingLists)
+    .set({ shareToken: token })
+    .where(and(eq(readingLists.id, listId), eq(readingLists.ownerId, ownerId)))
+    .returning({ id: readingLists.id });
+  return rows.length > 0 ? token : null;
+}
+
+export async function revokeListShareToken(listId: string, ownerId: string): Promise<boolean> {  const database = await readyDb();
+  const rows = await database
+    .update(readingLists)
+    .set({ shareToken: null })
+    .where(and(eq(readingLists.id, listId), eq(readingLists.ownerId, ownerId)))
+    .returning({ id: readingLists.id });
+  return rows.length > 0;
+}
+
+export async function addListItem(
+  listId: string,
+  ownerId: string,
+  postId: string,
+  note: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const database = await readyDb();
+  const [own] = await database
+    .select({ id: readingLists.id })
+    .from(readingLists)
+    .where(and(eq(readingLists.id, listId), eq(readingLists.ownerId, ownerId)))
+    .limit(1);
+  if (!own) return { ok: false, error: 'That list is not yours.' };
+  const [post] = await database
+    .select({ id: posts.id })
+    .from(posts)
+    .where(eq(posts.id, postId))
+    .limit(1);
+  if (!post) return { ok: false, error: 'That post does not exist.' };
+  const existing = await database
+    .select({ id: readingListItems.id })
+    .from(readingListItems)
+    .where(and(eq(readingListItems.listId, listId), eq(readingListItems.postId, postId)))
+    .limit(1);
+  if (existing.length > 0) return { ok: false, error: 'Already on that list.' };
+  const [max] = await database
+    .select({ m: sql<number>`coalesce(max(${readingListItems.ordinal}), -1)` })
+    .from(readingListItems)
+    .where(eq(readingListItems.listId, listId));
+  await database.insert(readingListItems).values({
+    id: nanoid(),
+    listId,
+    postId,
+    ordinal: Number(max?.m ?? -1) + 1,
+    note: note.trim().slice(0, 300),
+  });
+  return { ok: true };
+}
+
+export async function removeListItem(
+  listId: string,
+  ownerId: string,
+  postSlug: string,
+): Promise<boolean> {
+  const database = await readyDb();
+  const [own] = await database
+    .select({ id: readingLists.id })
+    .from(readingLists)
+    .where(and(eq(readingLists.id, listId), eq(readingLists.ownerId, ownerId)))
+    .limit(1);
+  if (!own) return false;
+  const [post] = await database
+    .select({ id: posts.id })
+    .from(posts)
+    .where(eq(posts.slug, postSlug))
+    .limit(1);
+  if (!post) return false;
+  await database
+    .delete(readingListItems)
+    .where(and(eq(readingListItems.listId, listId), eq(readingListItems.postId, post.id)));
+  return true;
+}
+
+/** The share token for display, owner only. Null when no link is issued. */
+export async function getListShareToken(listId: string, ownerId: string): Promise<string | null> {
+  const database = await readyDb();
+  const [row] = await database
+    .select({ shareToken: readingLists.shareToken })
+    .from(readingLists)
+    .where(and(eq(readingLists.id, listId), eq(readingLists.ownerId, ownerId)))
+    .limit(1);
+  return row?.shareToken ?? null;
+}
+
+/** Every list this user owns, including private ones the index never shows. */
+export async function myReadingLists(ownerId: string) {
+  const database = await readyDb();
+  const lists = await database
+    .select({
+      id: readingLists.id,
+      slug: readingLists.slug,
+      title: readingLists.title,
+      isPublic: readingLists.isPublic,
+      hasShareLink: sql<boolean>`${readingLists.shareToken} is not null`,
+    })
+    .from(readingLists)
+    .where(eq(readingLists.ownerId, ownerId))
+    .orderBy(readingLists.createdAt);
+  const out = [];
+  for (const list of lists) {
+    const [count] = await database
+      .select({ n: sql<number>`count(*)` })
+      .from(readingListItems)
+      .where(eq(readingListItems.listId, list.id));
+    out.push({ ...list, isPublic: Boolean(list.isPublic), hasShareLink: Boolean(list.hasShareLink), items: Number(count?.n ?? 0) });
+  }
+  return out;
 }

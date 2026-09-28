@@ -1,17 +1,23 @@
 ---
 import Base from '../../layouts/Base.astro';
 import PostRow from '../../components/PostRow.astro';
-import { getReadingList } from '../../lib/repo/taxonomy';
+import { getAccessibleList } from '../../lib/repo/taxonomy';
+import { getIdentity } from '../../lib/repo/auth';
 import { resolvePrefs, ANON_COOKIE } from '../../lib/prefs';
 
 const { slug } = Astro.params;
-const list = slug ? await getReadingList(slug) : null;
+const identity = await getIdentity(Astro.cookies);
+const key = Astro.url.searchParams.get('key');
+// A private list answers 404 to everyone else — confirming it exists would
+// already leak that it does. See getAccessibleList.
+const list = slug ? await getAccessibleList(slug, identity.userId, key) : null;
 if (!list) return new Response(null, { status: 404, statusText: 'Not found' });
 
 const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
 const prefs = resolvePrefs(Astro.cookies as never, anonId);
 
 const total = list.items.reduce((sum, i) => sum + (i.post.readingMinutes ?? 0), 0);
+const isOwner = identity.userId !== null && identity.userId === list.ownerId;
 ---
 
 <Base title={list.title} description={list.description} prefs={prefs}>
@@ -19,6 +25,11 @@ const total = list.items.reduce((sum, i) => sum + (i.post.readingMinutes ?? 0), 
     <div class="max-w-2xl">
       <p class="meta">Reading list · {list.ownerHandle}</p>
       <h1 class="mt-3 text-3xl">{list.title}</h1>
+      {!list.isPublic && (
+        <p class="meta mt-2 inline-block border border-ochre px-2 py-0.5 text-ochre">
+          Private{list.hasShareLink ? ' · shared by link' : ' · only you'}
+        </p>
+      )}
       <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">{list.description}</p>
       <p class="meta mt-4">
         {list.items.length} posts · about {total} minutes end to end
@@ -42,6 +53,17 @@ const total = list.items.reduce((sum, i) => sum + (i.post.readingMinutes ?? 0), 
               note={item.note}
               ordinal={i + 1}
             />
+            {isOwner && (
+              <form method="post" action="/api/lists" class="mb-4 ml-1">
+                <input type="hidden" name="action" value="remove" />
+                <input type="hidden" name="listId" value={list.id} />
+                <input type="hidden" name="postSlug" value={item.post.slug} />
+                <input type="hidden" name="returnTo" value={`/lists/${list.slug}`} />
+                <button type="submit" class="meta text-ink-3 hover:text-danger">
+                  Remove from list
+                </button>
+              </form>
+            )}
           </li>
         ))
       }

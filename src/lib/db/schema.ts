@@ -442,6 +442,8 @@ export const readingLists = sqliteTable('reading_lists', {
   title: text('title').notNull(),
   description: text('description').notNull().default(''),
   isPublic: integer('is_public', { mode: 'boolean' }).notNull().default(true),
+  /** Unguessable `?key=` access for private lists. Null = no link issued. */
+  shareToken: text('share_token'),
   createdAt: integer('created_at').notNull().default(now),
 });
 

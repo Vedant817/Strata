@@ -17,6 +17,7 @@ import { getIdentity } from '../../lib/repo/auth';
 import { countParticipants, listAnnotations, myReactions, voterKeyFor } from '../../lib/repo/annotations';
 import { isSaved, memoryKeyFor } from '../../lib/repo/reader';
 import { getMyHighlights } from '../../lib/repo/highlights';
+import { myReadingLists } from '../../lib/repo/taxonomy';
 import { askPost } from '../../lib/repo/ask';
 import { blockToPlainText } from '../../lib/blocks';
 import { resolvePrefs, DEPTH_COOKIE, ensureAnonId, type Depth } from '../../lib/prefs';
@@ -143,6 +144,7 @@ const myReactionSet = await myReactions(
 );
 const mineReactions = [...myReactionSet];
 const isSavedNow = await isSaved(memoryKeyFor(identity.userId, anonId), post.id);
+const ownLists = identity.userId ? await myReadingLists(identity.userId) : [];
 
 /** This reader's own highlights on this post, if any — the only place a
  *  highlight is ever shown to the person who made it. */
@@ -386,6 +388,37 @@ const jsonLd = [
                   {isSavedNow ? 'Saved ✓ — in your reading' : 'Save for later'}
                 </button>
               </form>
+              {identity.userId && ownLists.length > 0 && (
+                <details class="note-disclosure">
+                  <summary class="meta cursor-pointer text-ink-3 hover:text-ink">Add to a list</summary>
+                  <form method="post" action="/api/lists" class="mt-2 flex flex-wrap items-center gap-2">
+                    <input type="hidden" name="action" value="add" />
+                    <input type="hidden" name="postId" value={post.id} />
+                    <input type="hidden" name="returnTo" value={returnTo} />
+                    <label class="sr-only" for="add-to-list">
+                      Choose a list
+                    </label>
+                    <select
+                      id="add-to-list"
+                      name="listId"
+                      class="border border-rule bg-paper px-2 py-1 text-[0.8125rem] focus:border-accent focus:outline-none"
+                    >
+                      {ownLists.map((l) => (
+                        <option value={l.id}>
+                          {l.title}
+                          {l.isPublic ? '' : ' (private)'}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="submit"
+                      class="border border-rule px-2 py-1 text-[0.8125rem] text-ink-3 transition-colors hover:border-ink hover:text-ink"
+                    >
+                      Add
+                    </button>
+                  </form>
+                </details>
+              )}
               {identity.userId ? (
                 <form method="post" action="/api/fork" class="flex flex-wrap items-baseline gap-x-3 gap-y-2">
                   <input type="hidden" name="postId" value={post.id} />

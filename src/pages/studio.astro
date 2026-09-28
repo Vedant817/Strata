@@ -4,6 +4,7 @@ import StatusBadge from '../components/StatusBadge.astro';
 import { resolvePrefs, ANON_COOKIE } from '../lib/prefs';
 import { getIdentity } from '../lib/repo/auth';
 import { getOpenAsks, listCaptures, myPostHealth, synthesizeInbox } from '../lib/repo/studio';
+import { getListShareToken, myReadingLists } from '../lib/repo/taxonomy';
 import { getPostById } from '../lib/repo/posts';
 import { lintCitations, type LintReport } from '../lib/lint';
 import { driftScore, featuresOfBlocks, readVoice, type VoiceProfile } from '../lib/repo/voice';
@@ -47,6 +48,16 @@ if (identity.userId) {
   }
 }
 const flagged = identity.userId ? await getReportedNotes(identity.userId) : [];
+const ownedLists = identity.userId ? await myReadingLists(identity.userId) : [];
+const sharedListId = Astro.url.searchParams.get('shared');
+let sharedLink: string | null = null;
+if (identity.userId && sharedListId) {
+  const token = await getListShareToken(sharedListId, identity.userId);
+  if (token) {
+    const target = ownedLists.find((l) => l.id === sharedListId);
+    if (target) sharedLink = `/lists/${target.slug}?key=${token}`;
+  }
+}
 
 /* Voice: the stored fingerprint, and how the newest post sits against it.
    Refreshed on demand rather than silently — a fingerprint that updates
@@ -468,6 +479,111 @@ const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
                 </button>
               </form>
             </>
+          )}
+        </section>
+
+        <section aria-labelledby="lists-heading">
+          <h2 id="lists-heading" class="text-xl">Reading lists</h2>
+          <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+            Curate in the open, or keep a list private and share it by link.
+            Private lists answer 404 to everyone else — even confirming one
+            exists would leak that it does.
+          </p>
+          <form method="post" action="/api/lists" class="mt-4 border border-rule p-4">
+            <input type="hidden" name="action" value="create" />
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="block">
+                <span class="meta">Name</span>
+                <input
+                  name="title"
+                  required
+                  minlength={3}
+                  maxlength={120}
+                  placeholder="Before the argument"
+                  class="mt-1 w-full border border-rule bg-paper px-3 py-2 text-[0.9375rem] focus:border-accent focus:outline-none"
+                />
+              </label>
+              <label class="block">
+                <span class="meta">Visibility</span>
+                <select
+                  name="isPublic"
+                  class="mt-1 w-full border border-rule bg-paper px-3 py-2 text-[0.9375rem] focus:border-accent focus:outline-none"
+                >
+                  <option value="public">Public — listed with the others</option>
+                  <option value="private">Private — only you, until shared</option>
+                </select>
+              </label>
+            </div>
+            <label class="meta mt-3 block" for="list-desc">
+              Description
+            </label>
+            <input
+              id="list-desc"
+              name="description"
+              maxlength={500}
+              placeholder="Why these, in this order"
+              class="mt-1 w-full border border-rule bg-paper px-3 py-2 text-[0.9375rem] focus:border-accent focus:outline-none"
+            />
+            <button
+              type="submit"
+              class="mt-3 border border-ink bg-ink px-3 py-1.5 text-[0.875rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+            >
+              New list
+            </button>
+          </form>
+
+          {sharedLink && (
+            <p class="meta mt-3 border border-pine px-3 py-2 text-pine" role="status">
+              Share link: <code class="border border-rule bg-sunken px-1">{sharedLink}</code> —
+              anyone holding it can read the list. Rotating replaces it.
+            </p>
+          )}
+
+          {ownedLists.length > 0 && (
+            <ol class="mt-4 space-y-3">
+              {ownedLists.map((list) => (
+                <li class="border border-rule p-4">
+                  <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <a href={`/lists/${list.slug}`} class="font-medium no-underline hover:text-accent">
+                      {list.title}
+                    </a>
+                    <span class="meta">
+                      {list.items} {list.items === 1 ? 'post' : 'posts'} ·{' '}
+                      {list.isPublic ? 'public' : 'private'}
+                      {!list.isPublic && list.hasShareLink ? ' · shared by link' : ''}
+                    </span>
+                    <span class="ml-auto flex items-center gap-2">
+                      <form method="post" action="/api/lists" class="contents">
+                        <input type="hidden" name="action" value="visibility" />
+                        <input type="hidden" name="listId" value={list.id} />
+                        <input type="hidden" name="isPublic" value={list.isPublic ? 'private' : 'public'} />
+                        <button type="submit" class="meta text-ink-3 hover:text-ink">
+                          Make {list.isPublic ? 'private' : 'public'}
+                        </button>
+                      </form>
+                      {!list.isPublic &&
+                        (list.hasShareLink ? (
+                          <form method="post" action="/api/lists" class="contents">
+                            <input type="hidden" name="action" value="revoke" />
+                            <input type="hidden" name="listId" value={list.id} />
+                            <button type="submit" class="meta text-ink-3 hover:text-danger">
+                              Revoke link
+                            </button>
+                          </form>
+                        ) : (
+                          <form method="post" action="/api/lists" class="contents">
+                            <input type="hidden" name="action" value="share" />
+                            <input type="hidden" name="listId" value={list.id} />
+                            <button type="submit" class="meta text-ink-3 hover:text-ink">
+                              Get share link
+                            </button>
+                          </form>
+                        ))}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ol>
           )}
         </section>
 

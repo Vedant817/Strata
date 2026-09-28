@@ -50,6 +50,13 @@
       "when": 1790542231226,
       "tag": "0006_post_drafts",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790574005946,
+      "tag": "0007_list_share_tokens",
+      "breakpoints": true
     }
   ]
 }
