@@ -35,7 +35,11 @@ const evergreen = all.filter((p) => p.status === 'evergreen').slice(0, 2);
   {/* ------------------------------------------------------------------ */}
   <section class="shell border-b border-rule py-16 md:py-24">
     <div class="max-w-2xl">
-      <h1 class="text-4xl">The blog format never changed. The web did.</h1>
+      {/* The masthead. The tagline lives here, under the name, where it can be
+          set properly — in the running header it shared a baseline with the
+          wordmark and truncated. */}
+      <p class="meta">A publication about things that change</p>
+      <h1 class="mt-4 text-4xl">The blog format never changed. The web did.</h1>
       <div class="mt-6 space-y-4 text-[1.0625rem] leading-relaxed text-ink-2">
         <p>
           A post is still a file: written once, dated, abandoned. But the software it describes kept

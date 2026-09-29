@@ -16,12 +16,13 @@ const isActive = (href: string) => path === href || path.startsWith(href + '/');
 <header data-chrome="true" class="border-b border-rule bg-paper z-40 md:sticky md:top-0">
   <div class="shell">
     <div class="flex flex-wrap items-center gap-x-6 py-3 md:py-4">
-      <a href="/" class="group flex items-baseline gap-2 no-underline min-w-0">
+      {/* The wordmark alone. A tagline here fought the name for the same
+          baseline, truncated at awkward widths, and vanished below lg — so the
+          running header changed height depending on viewport. A tagline is a
+          masthead element; it lives on the front page, where there is room. */}
+      <a href="/" class="group no-underline shrink-0">
         <span class="font-serif text-[1.375rem] leading-none font-medium tracking-tight text-ink">
           Strata
-        </span>
-        <span class="meta hidden lg:inline truncate group-hover:text-ink-2 transition-colors" aria-hidden="true">
-          a publication about things that change
         </span>
       </a>
 

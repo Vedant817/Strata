@@ -11,6 +11,7 @@ import type { Block } from '../lib/blocks';
 import { blockInlineSource } from '../lib/blocks';
 import { renderInline, slugify } from '../lib/inline';
 import { renderWithHighlight } from '../lib/inline-diff';
+import { highlightCode, type Highlighted } from '../lib/highlight';
 import type { AnnotationView } from '../lib/repo/annotations';
 import NoteCard from './NoteCard.astro';
 import Artifact from './Artifact.astro';
@@ -44,6 +45,18 @@ const {
   returnTo = '',
   mine = [],
 } = Astro.props;
+
+/* Highlight every code block up front, in parallel, so the render loop below
+   stays synchronous. One Shiki instance is created and reused per process. */
+const codeHighlight = new Map<string, Highlighted>();
+await Promise.all(
+  blocks
+    .filter((b) => b.type === 'code')
+    .map(async (b) => {
+      const codeBlock = b as Extract<Block, { type: 'code' }>;
+      codeHighlight.set(codeBlock.id, await highlightCode(codeBlock.code, codeBlock.lang));
+    }),
+);
 
 /** Diff segments arrive pre-rendered from the inline-aware tokeniser, so a code
  *  span inside an edited paragraph stays a code span. */
@@ -167,12 +180,41 @@ const segHtml = (segments: Array<{ type: string; html?: string; text: string }>)
               </aside>
             )}
 
-            {block.type === 'code' && (
-              <figure>
-                <pre data-lang={block.lang}><code>{block.code}</code></pre>
-                {block.caption && <figcaption class="meta mt-2">{block.caption}</figcaption>}
-              </figure>
-            )}
+            {block.type === 'code' && (() => {
+              /* Highlighted once here, then both themes ship in the HTML and
+                 CSS picks one by data-theme. Highlighting per request per
+                 theme would double the work; highlighting in the browser would
+                 ship a highlighter to the reader. */
+              const h = codeHighlight.get(block.id) ?? ({} as Highlighted);
+              return (
+                <figure class="code-figure">
+                  <figcaption class="code-bar">
+                    <span class="meta" data-code-lang>
+                      {h.lang ?? block.lang}
+                    </span>
+                    <button
+                      type="button"
+                      class="meta code-copy"
+                      data-code-copy
+                      aria-label="Copy this snippet"
+                    >
+                      Copy
+                    </button>
+                  </figcaption>
+                  <pre class="code-body" data-code={block.code} data-highlighted={h.paper ? '1' : '0'}>
+                    {h.paper ? (
+                      <>
+                        <code class="theme-paper" set:html={h.paper} />
+                        {h.ink && <code class="theme-ink" set:html={h.ink} />}
+                      </>
+                    ) : (
+                      <code>{block.code}</code>
+                    )}
+                  </pre>
+                  {block.caption && <figcaption class="meta mt-2">{block.caption}</figcaption>}
+                </figure>
+              );
+            })()}
 
             {block.type === 'list' &&
               (block.ordered ? (
@@ -268,3 +310,31 @@ const segHtml = (segments: Array<{ type: string; html?: string; text: string }>)
     })
   }
 </div>
+
+<script is:inline>
+  (() => {
+    /* Copy a snippet. The raw text is carried in data-code, because the visible
+       markup is full of span elements and copying the DOM would copy the
+       highlighting with it. */
+    for (const btn of document.querySelectorAll('[data-code-copy]')) {
+      btn.addEventListener('click', async () => {
+        const pre = btn.closest('.code-figure')?.querySelector('[data-code]');
+        const text = pre?.getAttribute('data-code') ?? '';
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+          btn.textContent = 'Copied';
+          btn.setAttribute('data-state', 'copied');
+        } catch {
+          // Clipboard denied (insecure context, or the reader said no): say so
+          // rather than pretending it worked.
+          btn.textContent = 'Ctrl+C';
+        }
+        setTimeout(() => {
+          btn.textContent = 'Copy';
+          btn.removeAttribute('data-state');
+        }, 1600);
+      });
+    }
+  })();
+</script>

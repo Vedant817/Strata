@@ -486,6 +486,85 @@ mark[data-reader-highlight] {
   border-bottom-color: color-mix(in oklab, var(--ochre) 55%, transparent);
   border-bottom-width: 2px;
 }
+
+/* ---------------------------------------------------------------------------
+   Code blocks. Server-highlighted, both themes in the markup, CSS picks one.
+   A highlighter in the browser is 200KB+; the reader gets none of it.
+   ------------------------------------------------------------------------ */
+.code-figure {
+  margin-block: 2rem;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+}
+.code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--rule);
+  padding: 0.4rem 0.75rem;
+}
+/* A language name is a label, not a control: quieter than the copy button so
+   the affordance a reader can act on wins. */
+[data-code-lang] {
+  text-transform: lowercase;
+}
+.code-copy {
+  border: 1px solid transparent;
+  padding: 0.1rem 0.4rem;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.code-copy:hover {
+  border-color: var(--rule);
+  color: var(--ink);
+}
+.code-copy[data-state='copied'] {
+  color: var(--pine);
+  border-color: var(--pine);
+}
+.code-body {
+  overflow-x: auto;
+  padding: 1rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  tab-size: 2;
+}
+.code-body code {
+  display: block;
+  min-width: max-content;
+  background: none;
+  padding: 0;
+  font: inherit;
+  white-space: pre;
+}
+/* Only one theme is ever visible; the other stays in the DOM so switching
+   themes is instant and costs nothing. */
+.code-body code.theme-ink {
+  display: none;
+}
+[data-theme='ink'] .code-body code.theme-paper {
+  display: none;
+}
+[data-theme='ink'] .code-body code.theme-ink {
+  display: block;
+}
+/* Shiki emits a background on its <pre>; ours wins so the block inherits the
+   page surface rather than a second, slightly-off colour. */
+.code-body .shiki {
+  background: none !important;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  margin: 0;
+  padding: 0;
+}
+.code-body .shiki code {
+  display: block;
+  background: none !important;
+}
 /* A reply sits inside its parent's rail entry, so it reads as a continuation
    rather than a second thing arguing with the same sentence. */
 .note-reply {
