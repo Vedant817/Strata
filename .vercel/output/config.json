@@ -1,0 +1,200 @@
+{
+	"version": 3,
+	"routes": [
+		{
+			"src": "^/_astro(?:/(.*))$",
+			"headers": {
+				"cache-control": "public, max-age=31536000, immutable"
+			},
+			"continue": true
+		},
+		{
+			"handle": "filesystem"
+		},
+		{
+			"src": "^/_server-islands/([^/]+?)/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/_image/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/404/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/a/([^/]+?)/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/about/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/annotations/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/claim/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/cron/digest/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/cron/revisions/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/forget/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/fork/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/highlight/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/keys/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/lists/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/memory/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/models/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/newsletter/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/notes/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/presence/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/search-index/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/settings/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/studio/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/subscribe/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/api/telemetry/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/claim/([^/]+?)/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/constellations/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/lists/([^/]+?)/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/lists/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/og/([^/]+?)-diff\\.png$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/og/([^/]+?)\\.png$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/privacy/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/reader/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/robots\\.txt$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/rss\\.xml$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/search/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/settings/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/studio/edit/([^/]+?)/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/studio/readers/([^/]+?)/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/studio/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/thesis/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/topics/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/w/([^/]+?)/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/write/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/writing/?$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/$",
+			"dest": "_render"
+		},
+		{
+			"src": "^/.*$",
+			"dest": "_render",
+			"status": 404
+		}
+	]
+}
