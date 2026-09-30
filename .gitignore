@@ -10,6 +10,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+*.log
 dev.log
 dev.err.log
 dev.pid
@@ -23,6 +24,13 @@ data/
 # environment variables
 .env
 .env.production
+.env*.local
+
+# test / benchmark scratch
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
 
 # macOS-specific files
 .DS_Store
