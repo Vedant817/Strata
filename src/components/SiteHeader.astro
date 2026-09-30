@@ -9,6 +9,9 @@ const links = [
   { href: '/lists', label: 'Lists' },
   { href: '/search', label: 'Search' },
   { href: '/about', label: 'About' },
+  // Last: the only conversion action on the site. A reader who wants to write
+  // should never have to scroll to the footer to find out how.
+  { href: '/write', label: 'Write' },
 ];
 const isActive = (href: string) => path === href || path.startsWith(href + '/');
 /* Search is rendered separately below (it carries the palette trigger), so it
