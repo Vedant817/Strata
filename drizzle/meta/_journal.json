@@ -85,6 +85,20 @@
       "when": 1790606917688,
       "tag": "0011_list_collaborators",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1790741149637,
+      "tag": "0012_user_provider_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1790741208577,
+      "tag": "0013_ask_budget_provider",
+      "breakpoints": true
     }
   ]
 }

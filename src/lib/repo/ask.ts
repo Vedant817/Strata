@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import { readyDb } from '../db';
 import { asks } from '../db/schema';
 import { nanoid } from '../ids';
-import { answerWithModel, isModelConfigured } from '../model';
+import { answerFromAnyModel } from '../ai/ask';
 
 export interface AskPassage {
   blockId: string;
@@ -21,6 +21,9 @@ export interface AskResult {
    *  Always paired with the same `passages` — the model summarizes, it does
    *  not source. Null means the extractive quotes below are the answer. */
   answer: string | null;
+  /** Which model produced it, e.g. "openrouter / llama-3.3-70b:free". Shown
+   *  so a reader knows what summarized their post, and which quota paid. */
+  modelLabel: string | null;
   mode: 'extractive' | 'model';
 }
 
@@ -80,24 +83,30 @@ export async function askPost(
   const matched = passages.length > 0;
 
   // The model is an upgrade, never a dependency. If there is no key, no
-  // budget, an open breaker, a timeout, or the model abstains ("NOT
-  // COVERED"), we fall through to the extractive quotes — which are always
-  // present when matched. Grounding stays structural: the model only ever
-  // saw these passages, so its answer cannot outrun them.
+  // budget, an open breaker, a timeout, an HTTP error, or the model abstains
+  // ("NOT COVERED"), we fall through to the extractive quotes — which are always
+  // present when matched. Grounding stays structural: the model only ever saw
+  // these passages, so its answer cannot outrun them.
   let answer: string | null = null;
+  let modelLabel: string | null = null;
   let mode: 'extractive' | 'model' = 'extractive';
-  if (isModelConfigured()) {
-    // Wrapped: the model is an upgrade, never a dependency. Even an
-    // unexpected throw (a DB hiccup in the budget table, say) must not break
-    // answering — the extractive quotes are the floor, always.
-    let model: Awaited<ReturnType<typeof answerWithModel>> = null;
+  {
+    // Wrapped: even an unexpected throw (a DB hiccup in the budget table) must
+    // not break answering — the extractive quotes are the floor, always.
+    let model: Awaited<ReturnType<typeof answerFromAnyModel>> = null;
     try {
-      model = await answerWithModel(postId, clean, passages);
+      model = await answerFromAnyModel(
+        postId,
+        askedById,
+        passages.map((p) => p.quote),
+        clean,
+      );
     } catch (err) {
       console.error('[strata] ask model path failed, falling back:', err);
     }
     if (model) {
       answer = model.text;
+      modelLabel = model.label;
       mode = 'model';
     }
   }
@@ -124,5 +133,5 @@ export async function askPost(
     console.error('[strata] ask log failed:', err);
   }
 
-  return { question: clean, matched, passages, latencyMs, answer, mode };
+  return { question: clean, matched, passages, latencyMs, answer, modelLabel, mode };
 }

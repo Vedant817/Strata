@@ -443,9 +443,13 @@ export const askModelBudgets = sqliteTable(
   'ask_model_budgets',
   {
     postId: text('post_id')
-      .primaryKey()
+      .notNull()
       .references(() => posts.id, { onDelete: 'cascade' }),
-    /** Day bucket, ms since epoch — caps are per day, per author. */
+    /** A reader who has burned a Groq quota has not spent anything at
+     *  OpenAI, and one provider's outage should not silence another's key, so
+     *  the cap and the breaker are both per (post, provider). */
+    providerId: text('provider_id').notNull().default('anthropic'),
+    /** Day bucket, ms since epoch — caps are per day, per author, per provider. */
     windowStart: integer('window_start').notNull(),
     calls: integer('calls').notNull().default(0),
     consecutiveFailures: integer('consecutive_failures').notNull().default(0),
@@ -453,7 +457,38 @@ export const askModelBudgets = sqliteTable(
     openUntil: integer('open_until'),
     updatedAt: integer('updated_at').notNull().default(now),
   },
-  (t) => [index('ask_budget_window_idx').on(t.windowStart)],
+  (t) => [
+    primaryKey({ columns: [t.postId, t.providerId] }),
+    index('ask_budget_window_idx').on(t.windowStart),
+  ],
+);
+
+/**
+ * A user's own provider keys, sealed.
+ *
+ * The columns hold ciphertext, an IV, and an auth tag — never a key. `hint`
+ * and `fingerprint` exist so the settings page can show "ends 4f2a" and
+ * recognise a re-added key without ever decrypting for display. Deleting the
+ * row is the only way to remove a key from the system, which is the point.
+ */
+export const userProviderKeys = sqliteTable(
+  'user_provider_keys',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    providerId: text('provider_id').notNull(),
+    ciphertext: text('ciphertext').notNull(),
+    iv: text('iv').notNull(),
+    tag: text('tag').notNull(),
+    hint: text('hint').notNull().default(''),
+    fingerprint: text('fingerprint').notNull().default(''),
+    /** The model the user last chose for this provider. */
+    model: text('model'),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.providerId] })],
 );
 
 /* -------------------------------------------------------------------------- */

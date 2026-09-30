@@ -14,6 +14,9 @@ import {
   type Depth,
   type Density,
 } from '../lib/prefs';
+import { PROVIDERS } from '../lib/ai/providers';
+import { isByokEnabled } from '../lib/ai/secrets';
+import { listKeys } from '../lib/repo/providerKeys';
 
 const identity = await getIdentity(Astro.cookies);
 const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? crypto.randomUUID();
@@ -33,6 +36,11 @@ const density = localDensity ?? profile?.density ?? 'comfortable';
 
 const saved = Astro.url.searchParams.get('saved') === '1';
 const error = Astro.url.searchParams.get('settingsError');
+const keysError = Astro.url.searchParams.get('keysError');
+const keysDone = Astro.url.searchParams.get('keysDone');
+const byokEnabled = isByokEnabled();
+const myKeys = identity.userId ? await listKeys(identity.userId) : [];
+const keyByProvider = new Map(myKeys.map((k) => [k.providerId, k]));
 ---
 
 <Base title="Reading settings" description="How Strata reads to you." prefs={cookiePrefs}>
@@ -132,6 +140,114 @@ const error = Astro.url.searchParams.get('settingsError');
           </div>
         )
       }
+
+      {/* Bring your own model key. */}
+      <section class="mt-14 border-t border-rule pt-8" aria-labelledby="keys-heading">
+        <h2 id="keys-heading" class="text-xl">Your own model keys</h2>
+        <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+          Ask is extractive by default and needs no key at all — the answer is
+          always quotes from the post, which cannot hallucinate and costs
+          nothing. Add a key and a model summarizes those same quotes. Your key
+          is encrypted before it is stored, never shown again, and used only
+          for your own questions.
+        </p>
+        <p class="meta mt-2">
+          A ChatGPT Plus subscription is not an API key — OpenAI bills API usage
+          separately. Use a platform key.
+        </p>
+
+        {!identity.userId && (
+          <p class="mt-4 border border-rule p-4 text-[0.9375rem] text-ink-2">
+            <a href="/write" class="text-ink no-underline hover:text-accent">Claim a handle →</a>{' '}
+            to store a key. Keys are tied to an account so they can be revoked.
+          </p>
+        )}
+
+        {identity.userId && !byokEnabled && (
+          <p class="mt-4 border border-ochre p-4 text-[0.9375rem] text-ochre" role="alert">
+            Bring-your-own-key is switched off: this server has no
+            KEY_ENCRYPTION_SECRET, so a key cannot be stored safely. Ask still
+            works, extractively.
+          </p>
+        )}
+
+        {keysError && (
+          <p class="mt-4 border border-danger px-3 py-2 text-[0.9375rem] text-danger" role="alert">
+            {keysError}
+          </p>
+        )}
+        {keysDone && (
+          <p class="mt-4 border-l-2 border-pine pl-3 text-[0.9375rem] text-pine" role="status">
+            {keysDone}
+          </p>
+        )}
+
+        {identity.userId && byokEnabled && (
+          <ul class="mt-6 space-y-4">
+            {PROVIDERS.map((p) => {
+              const stored = keyByProvider.get(p.id);
+              return (
+                <li class="border border-rule p-4">
+                  <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <span class="font-medium">{p.label}</span>
+                    {stored ? (
+                      <span class="meta">
+                        key ending {stored.hint} · fingerprint {stored.fingerprint.slice(0, 8)}
+                        {stored.model ? ` · ${stored.model}` : ''}
+                      </span>
+                    ) : (
+                      <span class="meta">no key</span>
+                    )}
+                  </div>
+                  <p class="mt-1.5 text-[0.875rem] leading-relaxed text-ink-2">{p.note}</p>
+
+                  <form method="post" action="/api/keys" class="mt-3 flex flex-wrap items-end gap-2">
+                    <input type="hidden" name="returnTo" value="/settings" />
+                    {stored ? (
+                      <>
+                        <input type="hidden" name="action" value="remove" />
+                        <input type="hidden" name="providerId" value={p.id} />
+                        <button
+                          type="submit"
+                          class="border border-rule px-3 py-2 text-[0.875rem] text-ink-2 transition-colors hover:border-danger hover:text-danger"
+                        >
+                          Delete key
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <input type="hidden" name="action" value="add" />
+                        <input type="hidden" name="providerId" value={p.id} />
+                        <div class="min-w-0 flex-1">
+                          <label class="meta block" for={`key-${p.id}`}>
+                            API key
+                          </label>
+                          <input
+                            id={`key-${p.id}`}
+                            name="apiKey"
+                            type="password"
+                            required
+                            autocomplete="off"
+                            spellcheck={false}
+                            placeholder="paste your key"
+                            class="mt-1 w-full border border-rule bg-paper px-3 py-2 font-mono text-[0.8125rem] focus:border-accent focus:outline-none"
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          class="shrink-0 border border-ink bg-ink px-3 py-2 text-[0.875rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+                        >
+                          Save
+                        </button>
+                      </>
+                    )}
+                  </form>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
     </div>
   </div>
 </Base>
