@@ -14,6 +14,7 @@ import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { readyDb } from '../db';
 import { annotations, annotationReactions, annotationReports, posts, users } from '../db/schema';
 import { nanoid } from '../ids';
+import { stripInline } from '../inline';
 import {
   AUTHOR_ONLY_KINDS,
   type Annotation,
@@ -194,7 +195,11 @@ export async function listAnnotations(
   return rows
     .map((row) => {
       const parsed = safeAnchor(row.note.anchor);
-      const text = blockTexts.get(row.note.blockId) ?? '';
+      // Match against what the reader saw, not the stored markup. Anchors are
+      // created from rendered selections, so resolving against raw text with
+      // `*emphasis*` markers would mark every note on a formatted sentence as
+      // lost. See the write path for the same normalization.
+      const text = stripInline(blockTexts.get(row.note.blockId) ?? '');
       const resolved = parsed ? resolveAnchor(parsed, text) : { status: 'lost' as const, start: 0, end: 0 };
       const isAuthor = Boolean(row.note.authorId && row.note.authorId === opts.authorId);
       const isAuthorOnly = AUTHOR_ONLY_KINDS.includes(row.note.kind as AnnotationKind);

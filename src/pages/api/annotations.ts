@@ -9,6 +9,7 @@ import {
   resolveAnchor,
 } from '../../lib/repo/annotations';
 import { ANNOTATION_KINDS, type AnnotationKind } from '../../lib/db/schema';
+import { stripInline } from '../../lib/inline';
 
 const MAX_BODY = 4000;
 
@@ -95,12 +96,16 @@ export const POST: APIRoute = async ({ request, cookies }) => {
 
   // Resolve against this post's actual block text. This also proves the block
   // belongs to the post, so a note cannot be anchored into someone else's post.
+  // The stored text carries inline markup (`*floor*`) that the reader never
+  // sees — the browser sends the rendered sentence ("floor"). Matching raw
+  // against rendered meant any sentence with emphasis, code, or a link could
+  // never be annotated through the UI. Strip to what the reader saw first.
   const blockText = await blockTextFor(postId, versionId, blockId);
   if (blockText === null) return bad('That block is not part of this version of the post.', 409);
 
   const resolved = resolveAnchor(
     { blockId, start: 0, end: 0, quote, prefix: prefixHint, suffix: suffixHint },
-    blockText,
+    stripInline(blockText),
   );
   if (resolved.status === 'lost') {
     return bad(
