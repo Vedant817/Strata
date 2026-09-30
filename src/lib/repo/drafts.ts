@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { readyDb } from '../db';
 import { posts } from '../db/schema';
+import { normaliseLang } from '../highlight';
 import { nanoid } from '../ids';
 import { parseBody, serializeBody, type Block } from '../blocks';
 import { publishRevision } from './posts';
@@ -189,7 +190,11 @@ export async function publishDraft(
       case 'code':
         next = {
           ...prev,
-          lang: (form[`b_${i}_lang`] ?? 'text').slice(0, 40),
+          // Normalised on the way in, so the stored language is canonical:
+          // 'ts', 'TS' and 'TypeScript' would otherwise all be the same
+          // language with three spellings, and the highlighter's own
+          // unknown-language fallback would hide a typo nobody could see.
+          lang: normaliseLang((form[`b_${i}_lang`] ?? 'text').slice(0, 40)),
           code: (form[`b_${i}_code`] ?? '').slice(0, 60000),
           caption: (form[`b_${i}_caption`] ?? '').slice(0, 300),
           layer,

@@ -5,6 +5,7 @@ import { getIdentity } from '../../../lib/repo/auth';
 import { getPostBySlug } from '../../../lib/repo/posts';
 import { draftFromPublished, getDraft } from '../../../lib/repo/drafts';
 import { blockToPlainText } from '../../../lib/blocks';
+import { CODE_LANGUAGES, normaliseLang } from '../../../lib/highlight';
 
 /**
  * The block editor, and the first loom.
@@ -233,13 +234,40 @@ function blockText(b: (typeof doc.blocks)[number]): string {
                 </>
               ) : b.type === 'code' ? (
                 <>
-                  <input
-                    name={`b_${i}_lang`}
-                    value={b.lang}
-                    maxlength={40}
-                    aria-label="Code language"
-                    class="mt-2 w-40 border border-rule bg-paper px-3 py-2 font-mono text-[0.8125rem] focus:border-accent focus:outline-none"
-                  />
+                  {/* Show the normalised language so a post stored as 'ts'
+                      reads as "TypeScript" rather than "ts (unknown)"; saving
+                      then writes the canonical id. */}
+                  {(() => {
+                    const shownLang = normaliseLang(b.lang);
+                    return (
+                      <div class="mt-2 flex flex-wrap items-end gap-2">
+                        <div>
+                          <label class="meta block" for={`b_${i}_lang`}>
+                            Language
+                          </label>
+                          <select
+                            id={`b_${i}_lang`}
+                            name={`b_${i}_lang`}
+                            class="mt-1 w-44 border border-rule bg-paper px-2 py-2 font-mono text-[0.8125rem] focus:border-accent focus:outline-none"
+                          >
+                            {!CODE_LANGUAGES.some((l) => l.value === shownLang) && (
+                              <option value={shownLang} selected>
+                                {shownLang} (unknown)
+                              </option>
+                            )}
+                            {CODE_LANGUAGES.map((l) => (
+                              <option value={l.value} selected={l.value === shownLang}>
+                                {l.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <p class="meta pb-2">
+                          Syntax highlighting is applied when the post is published.
+                        </p>
+                      </div>
+                    );
+                  })()}
                   <textarea
                     name={`b_${i}_code`}
                     rows={Math.min(16, Math.max(4, b.code.split('\n').length + 1))}
