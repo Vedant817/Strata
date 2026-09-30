@@ -11,6 +11,10 @@ const links = [
   { href: '/about', label: 'About' },
 ];
 const isActive = (href: string) => path === href || path.startsWith(href + '/');
+/* Search is rendered separately below (it carries the palette trigger), so it
+   is excluded from the plain loop. Done here in frontmatter, where it is just
+   TypeScript, rather than in the template expression. */
+const navLinks = links.filter((l) => l.href !== '/search');
 ---
 
 <header data-chrome="true" class="border-b border-rule bg-paper z-40 md:sticky md:top-0">
@@ -35,7 +39,7 @@ const isActive = (href: string) => path === href || path.startsWith(href + '/');
       >
         <ul class="flex items-center gap-5 whitespace-nowrap md:gap-6">
           {
-            links.map((l) => (
+            navLinks.map((l) => (
               <li>
                 <a
                   href={l.href}
@@ -48,8 +52,28 @@ const isActive = (href: string) => path === href || path.startsWith(href + '/');
                   {l.label}
                 </a>
               </li>
-            ))
-          }
+            ))}
+            <li>
+              {/* A real link first: without JavaScript this goes to /search,
+                  the full FTS page. The palette script upgrades the click
+                  into the instant palette when it runs. */}
+              <a
+                href="/search"
+                data-palette-trigger
+                class:list={[
+                  'meta inline-block py-1.5 no-underline transition-colors hover:text-ink',
+                  isActive('/search') ? 'text-ink' : 'text-ink-3',
+                ]}
+              >
+                Search
+                <kbd
+                  class="ml-1.5 hidden rounded-sm border border-rule px-1 font-mono text-[0.6875rem] text-ink-3 md:inline-block"
+                  aria-hidden="true"
+                >
+                  ⌘K
+                </kbd>
+              </a>
+            </li>
         </ul>
       </nav>
 
@@ -90,6 +114,262 @@ const isActive = (href: string) => path === href || path.startsWith(href + '/');
     </div>
   </div>
 </header>
+
+{/* The command palette. Rendered always but hidden: without JavaScript the
+    Search link above is a plain link to /search and this never opens. */}
+<div data-palette hidden>
+  <div
+    data-palette-overlay
+    class="fixed inset-0 z-50 bg-ink/40"
+    aria-hidden="true"
+  />
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-label="Search Strata"
+    class="fixed inset-x-3 top-[12vh] z-50 mx-auto max-w-xl border border-rule-strong bg-paper"
+  >
+    <div class="border-b border-rule">
+      <input
+        data-palette-input
+        type="search"
+        autocomplete="off"
+        spellcheck={false}
+        placeholder="Search posts, topics, pages…"
+        aria-label="Search posts, topics, pages"
+        aria-expanded="true"
+        aria-controls="palette-results"
+        aria-activedescendant=""
+        role="combobox"
+        class="w-full bg-transparent px-4 py-3 text-[1.0625rem] focus:outline-none placeholder:text-ink-3"
+      />
+    </div>
+    <ul
+      id="palette-results"
+      data-palette-results
+      role="listbox"
+      aria-label="Results"
+      class="max-h-[46vh] overflow-y-auto p-1.5"
+    />
+    <div class="flex items-center justify-between border-t border-rule px-4 py-2">
+      <p class="meta" aria-hidden="true">↑↓ navigate · ↵ select · Esc close</p>
+      <a data-palette-all class="meta no-underline hover:text-ink" href="/search">
+        Full search →
+      </a>
+    </div>
+  </div>
+</div>
+
+<script is:inline>
+  (() => {
+    /* Instant palette: one fetch of a compact index, then every keystroke
+       filters in memory. No per-keystroke request, no debounce, no spinner —
+       on a corpus this size the filter is microseconds, so the only latency
+       is the single warm-up fetch, which starts on idle before first use. */
+    const trigger = document.querySelector('[data-palette-trigger]');
+    const root = document.querySelector('[data-palette]');
+    if (!trigger || !root) return;
+    const input = root.querySelector('[data-palette-input]');
+    const list = root.querySelector('[data-palette-results]');
+    const all = root.querySelector('[data-palette-all]');
+    const overlay = root.querySelector('[data-palette-overlay]');
+
+    const PAGES = [
+      { label: 'Go to Writing', hint: 'posts', href: '/writing', keys: 'writing posts all archive' },
+      { label: 'Go to Topics', hint: 'browse', href: '/topics', keys: 'topics browse subjects' },
+      { label: 'Go to Constellations', hint: 'graph', href: '/constellations', keys: 'constellations graph links' },
+      { label: 'Go to Lists', hint: 'curated', href: '/lists', keys: 'lists reading curated collections' },
+      { label: 'Go to About', hint: 'what is this', href: '/about', keys: 'about what is this strata' },
+      { label: 'Reading settings', hint: 'depth density', href: '/settings', keys: 'settings depth density preferences theme' },
+      { label: 'Write here', hint: 'studio', href: '/write', keys: 'write studio new draft' },
+    ];
+
+    let posts = null; // [{slug,title,dek,topic,minutes}]
+    let warmed = false;
+    async function warm() {
+      if (warmed) return;
+      warmed = true;
+      try {
+        const res = await fetch('/api/search-index', { headers: { accept: 'application/json' } });
+        if (!res.ok) return;
+        const json = await res.json();
+        if (Array.isArray(json.posts)) posts = json.posts;
+      } catch {
+        posts = null;
+      }
+    }
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(() => warm(), { timeout: 4000 });
+    } else {
+      setTimeout(warm, 1500);
+    }
+
+    let items = []; // rendered rows: {label, hint, href}
+    let active = -1;
+    let lastFocus = null;
+
+    function matchPosts(q) {
+      if (!posts) return [];
+      const out = [];
+      for (const p of posts) {
+        const title = p.title.toLowerCase();
+        const hay = (p.title + ' ' + (p.dek || '') + ' ' + (p.topic || '')).toLowerCase();
+        let score = -1;
+        if (title.startsWith(q)) score = 0;
+        else if (title.includes(q)) score = 1;
+        else if (hay.includes(q)) score = 2;
+        if (score >= 0) {
+          out.push({
+            score,
+            label: p.title,
+            hint: [p.topic, p.minutes ? p.minutes + ' min' : null].filter(Boolean).join(' · '),
+            href: '/w/' + p.slug,
+            dek: p.dek,
+          });
+        }
+      }
+      out.sort((a, b) => a.score - b.score);
+      return out.slice(0, 7);
+    }
+
+    function matchPages(q) {
+      const out = [];
+      for (const pg of PAGES) {
+        if (pg.label.toLowerCase().includes(q) || pg.keys.includes(q)) out.push(pg);
+      }
+      return out.slice(0, 4);
+    }
+
+    function render(q) {
+      const query = q.trim().toLowerCase();
+      items = query ? [...matchPosts(query), ...matchPages(query)] : PAGES.slice(0, 5);
+      active = items.length ? 0 : -1;
+      list.innerHTML = '';
+      input.setAttribute('aria-activedescendant', '');
+      all.href = '/search' + (query ? '?q=' + encodeURIComponent(q.trim()) : '');
+      if (!items.length) {
+        const li = document.createElement('li');
+        li.className = 'px-3 py-3 text-[0.9375rem] text-ink-3';
+        li.textContent = posts ? 'Nothing matches — try the full search.' : 'Index still loading — try the full search.';
+        list.appendChild(li);
+        return;
+      }
+      items.forEach((it, i) => {
+        const li = document.createElement('li');
+        li.id = 'palette-opt-' + i;
+        li.setAttribute('role', 'option');
+        const a = document.createElement('a');
+        a.href = it.href;
+        a.className =
+          'flex items-baseline justify-between gap-3 px-3 py-2 no-underline ' +
+          (i === active ? 'bg-sunken text-ink' : 'text-ink-2');
+        a.setAttribute('aria-selected', i === active ? 'true' : 'false');
+        a.tabIndex = -1;
+        const label = document.createElement('span');
+        label.className = 'text-[0.9375rem] font-medium';
+        label.textContent = it.label;
+        const hint = document.createElement('span');
+        hint.className = 'meta shrink-0';
+        hint.textContent = it.hint || '';
+        a.appendChild(label);
+        a.appendChild(hint);
+        // Clicking a row navigates natively; mousedown first so the input
+        // blur handler (if any) cannot eat the click.
+        a.addEventListener('mousedown', (e) => e.preventDefault());
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+      paint();
+    }
+
+    function paint() {
+      const rows = list.querySelectorAll('a');
+      rows.forEach((a, i) => {
+        const on = i === active;
+        a.classList.toggle('bg-sunken', on);
+        a.classList.toggle('text-ink', on);
+        a.classList.toggle('text-ink-2', !on);
+        a.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      input.setAttribute('aria-activedescendant', active >= 0 ? 'palette-opt-' + active : '');
+    }
+
+    function open() {
+      lastFocus = document.activeElement;
+      root.hidden = false;
+      document.body.style.overflow = 'hidden';
+      warm();
+      render('');
+      input.value = '';
+      // Focus synchronously first — in a background tab rAF may never fire,
+      // and an unfocused palette is a dead palette. The rAF re-asserts after
+      // layout in case the synchronous call raced the unhide.
+      try {
+        input.focus({ preventScroll: true });
+      } catch {
+        input.focus();
+      }
+      requestAnimationFrame(() => input.focus());
+    }
+    function close() {
+      root.hidden = true;
+      document.body.style.overflow = '';
+      if (lastFocus && lastFocus.focus) lastFocus.focus();
+    }
+
+    trigger.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (root.hidden) open();
+      else close();
+    });
+    overlay.addEventListener('click', close);
+    input.addEventListener('input', () => render(input.value));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (items.length) active = (active + 1) % items.length;
+        paint();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (items.length) active = (active - 1 + items.length) % items.length;
+        paint();
+      } else if (e.key === 'Enter') {
+        if (active >= 0 && items[active]) {
+          e.preventDefault();
+          window.location.href = items[active].href;
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && (e.key === 'k' || e.key === 'K')) {
+        // Never hijack typing: if the user is in a field, only an explicit
+        // click or Escape-then-shortcut opens the palette.
+        const t = e.target;
+        const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+        if (typing) return;
+        e.preventDefault();
+        if (root.hidden) open();
+        else close();
+      } else if (e.key === 'Escape' && !root.hidden) {
+        close();
+      }
+      // `/` opens the palette from anywhere except a field. The footer legend
+      // does not advertise it; it is a gift for the kind of reader who tries.
+      if (!mod && e.key === '/' && root.hidden) {
+        const t = e.target;
+        const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+        if (!typing) {
+          e.preventDefault();
+          open();
+        }
+      }
+    });
+  })();
+</script>
 
 <script is:inline define:vars={{ themeCookie: THEME_COOKIE, densityCookie: DENSITY_COOKIE }}>
   (() => {
