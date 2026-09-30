@@ -29,6 +29,11 @@ jobs:
             echo "DEPLOY_URL or CRON_SECRET not set — skipping, not failing."
             exit 0
           fi
+          # The app's CSRF check (Astro checkOrigin) rejects cross-site POSTs
+          # without an Origin, so present the site's own origin. This is not
+          # authentication — the bearer secret below is — it just proves the
+          # call is same-site rather than a forged browser form.
           curl -fsS -X POST "$DEPLOY_URL/api/cron/digest" \
             -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Origin: $DEPLOY_URL" \
             -H 'Content-Type: application/json'

@@ -34,4 +34,5 @@ jobs:
           fi
           curl -fsS -X POST "$DEPLOY_URL/api/cron/revisions" \
             -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Origin: $DEPLOY_URL" \
             -H 'Content-Type: application/json'
