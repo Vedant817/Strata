@@ -37,3 +37,6 @@ test-results/
 
 .vercel
 .env*
+
+# Local planning notes - kept out of the published repo.
+PLAN.md
