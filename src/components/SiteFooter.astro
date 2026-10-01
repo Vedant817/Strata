@@ -50,21 +50,22 @@ const newsletter = Astro.url.searchParams.get('newsletter');
       <div>
         <p class="meta">Read</p>
         <ul class="mt-3 space-y-2 text-[0.9375rem]">
-<li><a href="/writing" class="text-ink-2 no-underline hover:text-accent">All writing</a></li>
-<li><a href="/reader" class="text-ink-2 no-underline hover:text-accent">Your reading</a></li>
-<li><a href="/topics" class="text-ink-2 no-underline hover:text-accent">Topics</a></li>
+          <li><a href="/writing" class="text-ink-2 no-underline hover:text-accent">All writing</a></li>
+          <li><a href="/reader" class="text-ink-2 no-underline hover:text-accent">Your reading</a></li>
           <li><a href="/lists" class="text-ink-2 no-underline hover:text-accent">Reading lists</a></li>
           <li><a href="/rss.xml" class="text-ink-2 no-underline hover:text-accent">RSS</a></li>
         </ul>
       </div>
 
+      {/* The second column used to be "This site" — How it works, Is this
+          working?, Privacy, Write here. Every one of those is either already in
+          the masthead (About, Write) or one hop from it, so the column was four
+          links of furniture. Privacy stays: it is the only route to the data
+          page, and this publication asks for email addresses. */}
       <div>
-        <p class="meta">This site</p>
+        <p class="meta">Privacy</p>
         <ul class="mt-3 space-y-2 text-[0.9375rem]">
-<li><a href="/about" class="text-ink-2 no-underline hover:text-accent">How it works</a></li>
-<li><a href="/thesis" class="text-ink-2 no-underline hover:text-accent">Is this working?</a></li>
-<li><a href="/privacy" class="text-ink-2 no-underline hover:text-accent">Privacy</a></li>
-          <li><a href="/write" class="text-ink-2 no-underline hover:text-accent">Write here</a></li>
+          <li><a href="/privacy" class="text-ink-2 no-underline hover:text-accent">What we hold</a></li>
         </ul>
       </div>
     </div>
@@ -73,7 +74,7 @@ const newsletter = Astro.url.searchParams.get('newsletter');
       class="mt-12 flex flex-col gap-3 border-t border-rule pt-6 sm:flex-row sm:items-center sm:justify-between"
     >
       <p class="meta">
-        © {year} Strata. Set in IBM Plex.
+        © {year} Strata.
       </p>
       <a
         href="/privacy#forget"
