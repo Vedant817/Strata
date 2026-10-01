@@ -54,11 +54,15 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       console.error('[strata] claim email failed:', sent.error);
       /* Distinguish the two failures that look identical to the reader, because
          only one of them is worth retrying.
-           - "domain not verified" (403) means the *sender* is unconfigured. That
-             is ours to fix; asking the writer to try again would send them round
-             the loop forever.
-           - anything else is usually the address, which the writer can fix. */
-      const senderProblem = /not verified|domain/i.test(sent.error);
+           - an unverified *sender* (Resend: "The <domain> domain is not
+             verified") is ours to fix; telling the writer to try again would
+             send them round the loop forever.
+           - anything else is usually the address they typed, which they can fix.
+         Matched on "not verified" specifically: an earlier version also matched
+         the bare word "domain", which caught Resend's sandbox message about the
+         recipient ("use our testing email address instead of domains like
+         example.com") and wrongly blamed our sender for a bad address. */
+      const senderProblem = /not verified|unverified/i.test(sent.error);
       return new Response(
         senderProblem
           ? 'Your claim is recorded, but this site cannot send email yet — the sending address is not verified. Nothing was lost: ask again once mail is working.'
