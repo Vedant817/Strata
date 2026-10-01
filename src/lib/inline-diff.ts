@@ -90,6 +90,104 @@ export function renderWithHighlight(
   return html;
 }
 
+export interface InlineRange {
+  start: number;
+  end: number;
+  className: string;
+  attrs?: string;
+  tag?: string;
+  /** When two ranges cover the same words the lower number wins. A reader's own
+   *  highlight outranks a note anchor, because the note still reads in the margin
+   *  while the mark is the only trace of the highlight on the page. */
+  priority?: number;
+}
+
+/**
+ * Render source with several ranges wrapped at once — a note anchor and this
+ * reader's own highlights can land on the same block, and painting them in one
+ * pass keeps the tags correctly nested instead of interleaving half-open spans.
+ * Ranges must be sorted and non-overlapping; anything overlapping is dropped
+ * rather than guessed at.
+ */
+export function renderRanges(src: string, ranges: InlineRange[]): string {
+  const usable = ranges
+    .filter((r) => r.start < r.end)
+    .sort((a, b) => a.start - b.start || (a.priority ?? 1) - (b.priority ?? 1))
+    .filter((r, i, all) => i === 0 || r.start >= all[i - 1]!.end);
+
+  if (usable.length === 0) return renderInline(src);
+
+  const openTag = (r: InlineRange) => `<${r.tag ?? 'span'} class="${r.className}"${r.attrs ?? ''}>`;
+  const closeTag = (r: InlineRange) => `</${r.tag ?? 'span'}>`;
+
+  const tokens = tokenizeInline(src);
+  let offset = 0;
+  let html = '';
+  let next = 0;
+  const stack: InlineRange[] = [];
+
+  for (const token of tokens) {
+    const tokStart = offset;
+    const tokEnd = offset + token.text.length;
+    offset = tokEnd;
+
+    while (stack.length > 0 && stack[stack.length - 1]!.end <= tokStart) {
+      html += closeTag(stack.pop()!);
+    }
+    /* `usable` is sorted and non-overlapping, so a single forward cursor is
+       enough: every range is opened at most once and closed by the stack. */
+    while (next < usable.length && usable[next]!.start < tokEnd) {
+      const r = usable[next]!;
+      if (r.end > tokStart) {
+        stack.push(r);
+        html += openTag(r);
+      }
+      next++;
+    }
+    html += token.html;
+  }
+  while (stack.length > 0) html += closeTag(stack.pop()!);
+  return html;
+}
+
+/**
+ * Find a stored quote inside raw block source.
+ *
+ * Highlights are persisted as normalised prose (`text.replace(/\s+/g, ' ')`) but
+ * live in source that still carries its original line breaks and indentation, so
+ * a plain `indexOf` misses most of them. Comparing against a whitespace-folded
+ * copy — and carrying an index map back to the source — finds the run without
+ * ever slicing the wrong characters.
+ */
+export function findQuoteRange(src: string, quote: string): { start: number; end: number } | null {
+  const needle = quote.replace(/\s+/g, ' ').trim();
+  if (needle.length < 2) return null;
+
+  let folded = '';
+  const map: number[] = [];
+  let pendingSpace = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]!;
+    if (/\s/.test(ch)) {
+      pendingSpace = folded.length > 0;
+      continue;
+    }
+    if (pendingSpace) {
+      folded += ' ';
+      map.push(i);
+      pendingSpace = false;
+    }
+    folded += ch;
+    map.push(i);
+  }
+  if (needle.length > folded.length) return null;
+
+  const at = folded.indexOf(needle);
+  if (at < 0) return null;
+  const endIdx = at + needle.length - 1;
+  return { start: map[at]!, end: map[endIdx]! + 1 };
+}
+
 export interface InlineSegment {
   type: 'same' | 'ins' | 'del';
   /** Pre-rendered HTML for this contiguous group. */

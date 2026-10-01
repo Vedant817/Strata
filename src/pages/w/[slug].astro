@@ -16,7 +16,7 @@ import {
 import { getIdentity } from '../../lib/repo/auth';
 import { countParticipants, listAnnotations, myReactions, voterKeyFor } from '../../lib/repo/annotations';
 import { isSaved, memoryKeyFor } from '../../lib/repo/reader';
-import { getMyHighlights } from '../../lib/repo/highlights';
+import { getMyHighlights, getPostHighlights } from '../../lib/repo/highlights';
 import { myReadingLists } from '../../lib/repo/taxonomy';
 import { askPost } from '../../lib/repo/ask';
 import { blockToPlainText } from '../../lib/blocks';
@@ -152,6 +152,15 @@ const myHighlights = (await getMyHighlights(anonId, identity.userId)).filter(
   (h) => h.postSlug === post.slug,
 );
 const myHighlightCount = myHighlights.length;
+
+/** The same highlights, keyed by block, so the prose can paint the quotes back
+ *  onto the words. Previously the mark only existed for the lifetime of the
+ *  click that made it — reload the article and a reader's own highlighting was
+ *  gone from the text, only the list at the foot remembered it. */
+const myBlockHighlights: Record<string, string[]> = {};
+for (const h of await getPostHighlights(post.id, anonId, identity.userId)) {
+  (myBlockHighlights[h.blockId] ??= []).push(h.text);
+}
 
 /** Where a form post should return to: this page, query string intact, so the
  *  reader lands back on the revision or sort they were reading. */
@@ -332,6 +341,7 @@ const jsonLd = [
           canAccept={isPostAuthor}
           returnTo={returnTo}
           mine={mineReactions}
+          myHighlights={myBlockHighlights}
         />
       </div>
     </div>

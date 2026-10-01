@@ -76,6 +76,31 @@ export async function getHighlights(postId: string, limit = 10): Promise<Hotspot
   return rows.map((r) => ({ blockId: r.blockId, text: r.text, readers: Number(r.readers) }));
 }
 
+/**
+ * This reader's highlights on one post, with the block they belong to.
+ *
+ * `getMyHighlights` answers "what have I highlighted anywhere", which is what a
+ * highlights page needs. This is the other half: the article has to paint those
+ * same quotes back onto the text, and that requires the `blockId`, so it cannot
+ * be derived from the cross-post list.
+ */
+export async function getPostHighlights(
+  postId: string,
+  anonId: string,
+  userId: string | null,
+): Promise<{ blockId: string; text: string }[]> {
+  const database = await readyDb();
+  const key = `a:${anonId}`;
+  const who = userId
+    ? sql`(${highlights.userId} = ${userId} or ${highlights.anonId} = ${key})`
+    : sql`${highlights.anonId} = ${key}`;
+  return database
+    .select({ blockId: highlights.blockId, text: highlights.text })
+    .from(highlights)
+    .where(and(eq(highlights.postId, postId), who))
+    .orderBy(desc(highlights.createdAt));
+}
+
 export interface ReaderHighlight {
   postSlug: string;
   postTitle: string;

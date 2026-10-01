@@ -10,7 +10,7 @@
 import type { Block } from '../lib/blocks';
 import { blockInlineSource } from '../lib/blocks';
 import { renderInline, slugify } from '../lib/inline';
-import { renderWithHighlight } from '../lib/inline-diff';
+import { findQuoteRange, renderRanges, type InlineRange } from '../lib/inline-diff';
 import { highlightCode, type Highlighted } from '../lib/highlight';
 import type { AnnotationView } from '../lib/repo/annotations';
 import NoteCard from './NoteCard.astro';
@@ -30,6 +30,9 @@ interface Props {
   canAccept?: boolean;
   returnTo?: string;
   mine?: string[];
+  /** This reader's own highlight quotes, keyed by block id, painted back onto
+   *  the text server-side so a highlight survives a reload. */
+  myHighlights?: Record<string, string[]>;
   versionNumber?: number;
 }
 
@@ -44,6 +47,7 @@ const {
   canAccept = false,
   returnTo = '',
   mine = [],
+  myHighlights = {},
 } = Astro.props;
 
 /* Highlight every code block up front, in parallel, so the render loop below
@@ -88,17 +92,44 @@ const segHtml = (segments: Array<{ type: string; html?: string; text: string }>)
       const hasNotes = blockNotes.length > 0;
       const renderBody = () => {
         if (segments) return segHtml(segments);
-        // Highlight the first note's span in the prose itself.
         const first = blockNotes[0];
         const source = blockInlineSource(block);
-        if (first && first.resolved.status !== 'lost' && first.anchor.quote) {
-          const attrs = ` data-note-anchor="${first.id}"`;
-          const cls = first.isMine ? 'hl-anchor hl-mine' : 'hl-anchor';
-          if (block.type === 'paragraph' || block.type === 'tldr') {
-            return renderWithHighlight(source, first.resolved.start, first.resolved.end, cls, attrs);
+        const inlinable =
+          block.type === 'paragraph' ||
+          block.type === 'tldr' ||
+          block.type === 'heading' ||
+          block.type === 'quote' ||
+          block.type === 'primer';
+
+        if (!inlinable) return renderInline(source);
+
+        /* A note anchor and a reader's own highlight can land on the same words,
+           so both are painted in one pass to keep the tags properly nested. The
+           highlight is listed first and carries the lower priority number, so a
+           reader never loses their own mark to somebody else's note. */
+        const ranges: InlineRange[] = [];
+        for (const quote of myHighlights[id] ?? []) {
+          const found = findQuoteRange(source, quote);
+          if (found) {
+            ranges.push({
+              ...found,
+              className: 'reader-highlight',
+              attrs: ' data-reader-highlight=""',
+              tag: 'mark',
+              priority: 0,
+            });
           }
         }
-        return renderInline(source);
+        if (first && first.resolved.status !== 'lost' && first.anchor.quote) {
+          ranges.push({
+            start: first.resolved.start,
+            end: first.resolved.end,
+            className: first.isMine ? 'hl-anchor hl-mine' : 'hl-anchor',
+            attrs: ` data-note-anchor="${first.id}"`,
+            priority: 1,
+          });
+        }
+        return ranges.length > 0 ? renderRanges(source, ranges) : renderInline(source);
       };
 
         return (
