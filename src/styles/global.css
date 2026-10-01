@@ -618,6 +618,13 @@ mark[data-reader-highlight] {
 }
 .affordance:hover { border-color: var(--accent); color: var(--accent); }
 
+/* The same button becomes "Remove highlight" when the selection is already one
+   the reader made. It stays in the same place and keeps the same affordance
+   styling on purpose — only the colour changes, so undo reads as an undo and
+   not as a different, more dangerous-looking control. */
+.affordance.is-removing { border-color: var(--danger); color: var(--danger); }
+.affordance.is-removing:hover { border-color: var(--danger); color: var(--paper); background: var(--danger); }
+
 /* When a selection offers two actions (annotate vs highlight) they travel
    together in one positioned group, so the two buttons cannot end up at
    different points. The group owns the viewport coordinates and the lift; the

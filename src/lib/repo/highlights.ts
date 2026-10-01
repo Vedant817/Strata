@@ -102,8 +102,12 @@ export async function getPostHighlights(
 }
 
 export interface ReaderHighlight {
+  postId: string;
   postSlug: string;
   postTitle: string;
+  /** Which block the span sits in, so a reader can remove one highlight
+   *  without having to re-select the exact words it covers. */
+  blockId: string;
   text: string;
   createdAt: number;
 }
@@ -120,8 +124,10 @@ export async function getMyHighlights(
     : sql`${highlights.anonId} = ${key}`;
   return database
     .select({
+      postId: highlights.postId,
       postSlug: posts.slug,
       postTitle: posts.title,
+      blockId: highlights.blockId,
       text: highlights.text,
       createdAt: highlights.createdAt,
     })

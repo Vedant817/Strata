@@ -26,10 +26,16 @@ const { postId, versionId, canWriteAuthorNote, signedInAs } = Astro.props;
 
 <!-- Discoverability. Before this script runs there is no affordance at all, so
      a reader who selects a sentence gets nothing and concludes the feature
-     does not exist. This is the hint that closes that gap. -->
+     does not exist. This is the hint that closes that gap.
+
+     It used to sit in the bottom-left corner for the life of the page, on top
+     of the text column, which is a worse trade than the problem it solves: a
+     permanent overlay on a publication whose whole claim is that the prose is
+     unobstructed. It now shows once, retires itself, and never returns. -->
 <p
-  class="fixed bottom-3 left-3 z-40 hidden border border-rule bg-surface px-3 py-2 lg:block"
+  class="pointer-events-none fixed bottom-3 left-3 z-40 hidden border border-rule bg-surface px-3 py-2 lg:block"
   data-marginalia-hint
+  aria-hidden="true"
 >
   <span class="meta">Select any sentence to leave a note</span>
 </p>
@@ -56,6 +62,42 @@ const { postId, versionId, canWriteAuthorNote, signedInAs } = Astro.props;
     const affordance = document.querySelector('[data-marginalia-affordance]');
     if (!affordance) return;
 
+    /* Show the hint once per browser, then get out of the way for good. Eight
+       seconds is long enough to read and short enough not to become furniture;
+       the first selection retires it immediately, and either way it is not
+       brought back on later visits. */
+    const HINT_KEY = 'strata_marginalia_hint';
+    let hintTimer = 0;
+    const retireHint = (forever) => {
+      if (!hint) return;
+      clearTimeout(hintTimer);
+      hint.classList.add('hidden');
+      if (!forever) return;
+      try {
+        localStorage.setItem(HINT_KEY, '1');
+      } catch {
+        /* Private mode, storage disabled: the timeout still retires it. */
+      }
+    };
+    if (hint) {
+      let seen = false;
+      try {
+        seen = localStorage.getItem(HINT_KEY) === '1';
+      } catch {
+        seen = false;
+      }
+      if (seen) {
+        hint.classList.add('hidden');
+      } else {
+        hint.classList.remove('hidden');
+        /* Retire it for good, on the timer as well as on use. Remembering only
+           on use meant a reader who never selected anything was greeted by the
+           same overlay on every article, which is the complaint that started
+           this. Eight seconds is enough to read it once. */
+        hintTimer = window.setTimeout(() => retireHint(true), 8000);
+      }
+    }
+
     /** Current selection, or null. */
     let selection = null; // { blockId, quote, prefixHint, suffixHint, x, y, range }
     let composer = null;
@@ -69,7 +111,9 @@ const { postId, versionId, canWriteAuthorNote, signedInAs } = Astro.props;
         composer.remove();
         composer = null;
       }
-      if (hint) hint.classList.remove('hidden');
+      /* Do not put it back on dismiss — a hint that returns every time you look
+         away is the overlay problem wearing a different hat. */
+      if (hint) hint.classList.add('hidden');
     };
 
     /* --- selection capture ------------------------------------------------ */
@@ -91,6 +135,19 @@ const { postId, versionId, canWriteAuthorNote, signedInAs } = Astro.props;
       const blockText = block.textContent ?? '';
       const at = blockText.indexOf(text);
       scrollAtSelection = window.scrollY;
+      /* Selecting words the reader already marked is a request to undo the mark,
+         not to add another one. Say so on the button instead of leaving them to
+         discover that "Highlight" means "remove". */
+      const existingMark = el?.closest('mark[data-reader-highlight]');
+      const highlightBtn = affordance.querySelector('[data-marginalia-highlight]');
+      if (highlightBtn) {
+        highlightBtn.textContent = existingMark ? 'Remove highlight' : 'Highlight';
+        highlightBtn.setAttribute(
+          'aria-label',
+          existingMark ? 'Remove this highlight' : 'Highlight this for yourself',
+        );
+        highlightBtn.classList.toggle('is-removing', Boolean(existingMark));
+      }
       selection = {
         blockId: block.getAttribute('data-block-id'),
         quote: text,
@@ -106,7 +163,7 @@ const { postId, versionId, canWriteAuthorNote, signedInAs } = Astro.props;
     function positionAffordance() {
       if (!selection) return;
       affordance.classList.remove('hidden');
-      if (hint) hint.classList.add('hidden');
+      if (hint) retireHint(true);
       affordance.style.left = Math.min(Math.max(selection.x, 110), window.innerWidth - 110) + 'px';
       affordance.style.top = Math.max(selection.y - 8, 40) + 'px';
     }

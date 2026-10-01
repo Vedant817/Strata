@@ -650,6 +650,20 @@ const jsonLd = [
                     </a>{' '}
                     · {ago(h.createdAt)}
                   </p>
+                  {/* A highlight you cannot take back is a decision made for you.
+                      This posts the same span back to the toggle endpoint, which
+                      removes it, and drops you back here on the redirect. */}
+                  {h.postId === post.id && (
+                    <form method="post" action="/api/highlight" class="mt-1.5">
+                      <input type="hidden" name="postId" value={post.id} />
+                      <input type="hidden" name="blockId" value={h.blockId} />
+                      <input type="hidden" name="text" value={h.text} />
+                      <input type="hidden" name="returnTo" value={returnTo} />
+                      <button type="submit" class="meta text-ink-3 hover:text-danger">
+                        Remove this highlight
+                      </button>
+                    </form>
+                  )}
                 </li>
               ))}
             </ol>
