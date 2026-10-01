@@ -3,6 +3,9 @@ import { z } from 'zod';
 import { getIdentity } from '../../lib/repo/auth';
 import { ANON_COOKIE } from '../../lib/prefs';
 import { highlightKeyFor, toggleHighlight } from '../../lib/repo/highlights';
+import { getPostById } from '../../lib/repo/posts';
+import { blockInlineSource } from '../../lib/blocks';
+import { findQuoteRange } from '../../lib/inline-diff';
 
 /**
  * Toggle a highlight. A form post so it works without JavaScript; the island
@@ -51,6 +54,26 @@ export const POST: APIRoute = async ({ request, cookies, redirect }) => {
     return redirect(back, 303);
   }
 
+  /* Only keep a highlight that can be found again.
+   *
+   * A reader can select text that lives inside a block without being part of its
+   * prose — the "In one paragraph" label above a summary, a figure caption. That
+   * used to be stored happily and then rendered nowhere, forever: an invisible
+   * highlight the reader can neither see nor clear. Resolving the quote against
+   * the block before writing costs one row read and keeps every highlight
+   * re-anchorable. */
+  const post = await getPostById(parsed.data.postId);
+  const block = post?.blocks.find((b) => b.id === parsed.data.blockId);
+  if (!block || !findQuoteRange(blockInlineSource(block), parsed.data.text)) {
+    if (contentType.includes('application/json')) {
+      return new Response(JSON.stringify({ error: 'That selection is not part of the text.' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return redirect(back, 303);
+  }
+
   const added = await toggleHighlight({
     postId: parsed.data.postId,
     blockId: parsed.data.blockId,
@@ -67,4 +90,4 @@ export const POST: APIRoute = async ({ request, cookies, redirect }) => {
   return redirect(`${back}${back.includes('?') ? '&' : '?'}hl=${added ? 'on' : 'off'}`, 303);
 };
 
-export const GET: APIRoute = () => Response.redirect('/', 303);
+export const GET: APIRoute = ({ redirect }) => redirect('/', 303);

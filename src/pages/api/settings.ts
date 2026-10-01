@@ -48,4 +48,4 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url }) => {
   return redirect(target.pathname + target.search, 303);
 };
 
-export const GET: APIRoute = () => Response.redirect('/settings', 303);
+export const GET: APIRoute = ({ redirect }) => redirect('/settings', 303);
