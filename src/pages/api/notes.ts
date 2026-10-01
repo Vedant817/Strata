@@ -44,4 +44,10 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url }) => {
   return redirect(back, 303);
 };
 
-export const GET: APIRoute = () => Response.redirect('/writing', 303);
+/**
+ * A stray GET here used to hand back `Response.redirect('/writing', 303)`, which
+ * throws `TypeError: Invalid URL` because that constructor insists on an absolute
+ * URL — every hit on `/api/notes` 500'd. Astro's own `redirect` resolves the path
+ * against the request, which is what this endpoint actually wants.
+ */
+export const GET: APIRoute = ({ redirect }) => redirect('/writing', 303);
