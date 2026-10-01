@@ -44,14 +44,42 @@ export interface AskResult {
  * interface is the passages, not the prose.
  */
 
-function toFtsQuery(raw: string): string | null {
-  const terms = raw
+/** Words that carry no retrieval signal in an English question. */
+const STOPWORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'did', 'do', 'does', 'for', 'from',
+  'had', 'has', 'have', 'how', 'i', 'if', 'in', 'into', 'is', 'it', 'its', 'me', 'my', 'of',
+  'on', 'or', 'our', 'so', 'that', 'the', 'their', 'them', 'then', 'there', 'these', 'they',
+  'this', 'to', 'was', 'we', 'were', 'what', 'when', 'where', 'which', 'who', 'why', 'will',
+  'with', 'would', 'you', 'your',
+]);
+
+function terms(raw: string): string[] {
+  return raw
     .split(/\s+/)
-    .map((t) => t.replace(/["*]/g, '').trim())
-    .filter((t) => t.length > 1)
-    .slice(0, 10);
-  if (terms.length === 0) return null;
-  return terms.map((t) => `"${t}"`).join(' ');
+    .map((t) => t.replace(/[^\p{L}\p{N}]+/gu, '').trim())
+    .filter((t) => t.length > 1 && !STOPWORDS.has(t.toLowerCase()))
+    .slice(0, 12);
+}
+
+/**
+ * Build FTS queries for a question, most precise first.
+ *
+ * This used to quote every whitespace-separated token and AND them, so "Why is
+ * summing p99 latencies a mistake?" demanded the post contain `why`, `is`, `a`
+ * and `mistake?` too. Nothing ever did, `matched` came back false, and the page
+ * told the reader "This isn't covered in the article" — on an article whose
+ * first sentence is exactly about summing p99s. The quotes were the feature and
+ * the retrieval was quietly refusing them.
+ *
+ * So: content words only, tried as an AND first for precision, then as an OR so
+ * a real question still finds its passage. The second query is a superset of the
+ * first, so it can only ever widen recall, never reorder the top hits.
+ */
+function toFtsQueries(raw: string): string[] {
+  const t = terms(raw);
+  if (t.length === 0) return [];
+  const quoted = t.map((x) => `"${x}"`);
+  return [quoted.join(' '), quoted.join(' OR ')];
 }
 
 export async function askPost(
@@ -63,20 +91,23 @@ export async function askPost(
 ): Promise<AskResult> {
   const started = Date.now();
   const clean = question.trim().slice(0, 500);
-  const query = clean.length >= 2 ? toFtsQuery(clean) : null;
+  const queries = clean.length >= 2 ? toFtsQueries(clean) : [];
 
   let passages: AskPassage[] = [];
-  if (query) {
+  if (queries.length > 0) {
     const database = await readyDb();
-    const rows = await database.all<{ block_id: string; quote: string }>(sql`
-      SELECT block_id AS block_id,
-        snippet(block_fts, 0, '<mark>', '</mark>', '…', 32) AS quote
-      FROM block_fts
-      WHERE post_id = ${postId} AND block_fts MATCH ${query}
-      ORDER BY rank
-      LIMIT ${limit}
-    `);
-    passages = rows.map((r) => ({ blockId: r.block_id, quote: r.quote }));
+    for (const query of queries) {
+      const rows = await database.all<{ block_id: string; quote: string }>(sql`
+        SELECT block_id AS block_id,
+          snippet(block_fts, 0, '<mark>', '</mark>', '…', 32) AS quote
+        FROM block_fts
+        WHERE post_id = ${postId} AND block_fts MATCH ${query}
+        ORDER BY rank
+        LIMIT ${limit}
+      `);
+      passages = rows.map((r) => ({ blockId: r.block_id, quote: r.quote }));
+      if (passages.length > 0) break;
+    }
   }
 
   const latencyMs = Date.now() - started;

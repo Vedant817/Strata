@@ -35,6 +35,54 @@ export interface CatalogModel {
   free: boolean;
 }
 
+/**
+ * Ids that are not chat models.
+ *
+ * A free-tier catalogue is not a list of assistants. Groq's free tier includes
+ * `whisper-large-v3-turbo` (speech to text) and two prompt-guard models; neither
+ * answers a question, and a guard model will happily return a moderation verdict
+ * as if it were prose. So the picker has to know what it is looking at rather
+ * than trusting position in the list.
+ */
+const NOT_CHAT = /guard|safeguard|whisper|embed|tts|stt|rerank|moderation|moderat|safety|vision|ocr|audio|audio-to|transcribe/i;
+
+/**
+ * Known-good free chat models, in preference order, per provider.
+ *
+ * This exists because a hardcoded fallback is a promise that decays: the
+ * configured `llama-3.3-70b-versatile` 404s on Groq and its OpenRouter `:free`
+ * twin was withdrawn, which left Ask answering nothing at all while every test
+ * that only checked "is a key configured" still passed. The real catalogue is
+ * the source of truth — this only decides which of the live models we would
+ * rather talk to, and anything here that is no longer offered is skipped.
+ */
+const PREFERRED_CHAT: Record<string, string[]> = {
+  groq: ['qwen/qwen3.8-27b', 'llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'openai/gpt-oss-120b'],
+  openrouter: [
+    'qwen/qwen3.8-27b:free',
+    'meta-llama/llama-3.3-70b-instruct:free',
+    'deepseek/deepseek-chat-v3-0324:free',
+    'mistralai/mistral-small-3.1-24b-instruct:free',
+  ],
+};
+
+/**
+ * Pick a model to actually call from a live catalogue.
+ *
+ * Preference order first, then anything that merely looks like a chat model.
+ * Returns null when the catalogue offers nothing usable, which lets the caller
+ * fall back to extractive quotes instead of burning a request on a 404.
+ */
+export function chooseChatModel(models: CatalogModel[], providerId: string): string | null {
+  const live = new Set(models.filter((m) => m.free).map((m) => m.id));
+  if (live.size === 0) return null;
+  for (const id of PREFERRED_CHAT[providerId] ?? []) {
+    if (live.has(id)) return id;
+  }
+  const plausible = models.find((m) => m.free && !NOT_CHAT.test(m.id));
+  return plausible?.id ?? null;
+}
+
 function env(name: string): string | undefined {
   const existing = process.env[name];
   if (existing) return existing;

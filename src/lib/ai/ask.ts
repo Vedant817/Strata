@@ -1,5 +1,5 @@
 import { chatGrounded } from './client';
-import { houseKeyFor, listModels } from './catalog';
+import { houseKeyFor, listModels, chooseChatModel } from './catalog';
 import { checkBudget, recordCall } from './budget';
 import { getProvider } from './providers';
 import { chosenModel, resolveKey } from '../repo/providerKeys';
@@ -29,26 +29,43 @@ export interface Resolved {
   paidBy: 'reader' | 'house';
 }
 
-async function resolve(userId: string | null): Promise<Resolved | null> {
-  // Reader's own key first.
+/**
+ * Every transport worth trying, in order: the reader's own key first, then each
+ * configured house key. A list rather than a single answer, because one
+ * provider declining does not mean nobody can answer.
+ */
+async function candidates(userId: string | null): Promise<Resolved[]> {
+  const out: Resolved[] = [];
+
   if (userId) {
     const key = await resolveKey(userId, 'anthropic').catch(() => null);
     if (key) {
       const model = (await chosenModel(userId, 'anthropic').catch(() => null)) ?? 'claude-sonnet-4-5';
-      return { providerId: 'anthropic', model, key, paidBy: 'reader' };
+      out.push({ providerId: 'anthropic', model, key, paidBy: 'reader' });
     }
   }
-  // Otherwise any house key that exists, preferring the owner's configured
-  // free-tier providers.
+
   for (const candidate of ['openrouter', 'groq', 'anthropic']) {
     const key = houseKeyFor(candidate);
     if (!key) continue;
     const provider = getProvider(candidate);
     if (!provider) continue;
-    const model = provider.fallbackModel;
-    return { providerId: candidate, model, key, paidBy: 'house' };
+    /* Ask the live catalogue which model to call rather than trusting the
+       configured `fallbackModel`. That constant was a hardcoded id that quietly
+       died — Groq stopped serving its Llama slug and OpenRouter withdrew the
+       `:free` twin — so every request 404'd and Ask fell back to plain quotes
+       without ever saying why. The catalogue is what is actually on offer now. */
+    let model = provider.fallbackModel;
+    try {
+      const live = await listModels(candidate, key, { freeOnly: true });
+      model = chooseChatModel(live, candidate) ?? model;
+    } catch {
+      // Catalogue unavailable: the configured fallback is better than nothing.
+    }
+    out.push({ providerId: candidate, model, key, paidBy: 'house' });
   }
-  return null;
+
+  return out;
 }
 
 export interface ModelAnswer {
@@ -72,36 +89,53 @@ export async function answerFromAnyModel(
 ): Promise<ModelAnswer | null> {
   if (passages.length === 0) return null;
 
-  let chosen: Resolved | null;
+  let options: Resolved[];
   try {
-    chosen = await resolve(userId);
+    options = await candidates(userId);
   } catch (err) {
     console.error('[strata] model resolve failed:', err);
     return null;
   }
-  if (!chosen) return null;
 
-  const budget = await checkBudget(postId, chosen.providerId).catch(() => ({ ok: true }));
-  if (!budget.ok) return null;
+  const grounded = passages.map((p) => p.replace(/<\/?mark>/g, ''));
 
-  const result = await chatGrounded({
-    providerId: chosen.providerId,
-    apiKey: chosen.key,
-    model: chosen.model,
-    passages: passages.map((p) => p.replace(/<\/?mark>/g, '')),
-    question,
-  }).catch(() => null);
+  /* Try each in turn and take the first real answer.
+     Previously this resolved exactly one transport and returned null the moment
+     it declined: OpenRouter's model would abstain, and because it was tried
+     first, the one provider that would have answered never got asked. An
+     abstention is an answer about *that model*, not about the question. */
+  let lastFailure: string | null = null;
+  for (const chosen of options) {
+    const budget = await checkBudget(postId, chosen.providerId).catch(() => ({ ok: true }));
+    if (!budget.ok) {
+      lastFailure = `budget exhausted for ${chosen.providerId}`;
+      continue;
+    }
 
-  if (!result) return null;
-  await recordCall(postId, chosen.providerId, result.ok).catch(() => {});
-  if (!result.ok || result.outcome !== 'answered') return null;
-  return {
-    text: result.text,
-    model: result.model,
-    providerId: chosen.providerId,
-    label: `${chosen.providerId} / ${result.model}`,
-    latencyMs: result.latencyMs,
-  };
+    const result = await chatGrounded({
+      providerId: chosen.providerId,
+      apiKey: chosen.key,
+      model: chosen.model,
+      passages: grounded,
+      question,
+    }).catch(() => null);
+
+    await recordCall(postId, chosen.providerId, result?.ok ?? false).catch(() => {});
+
+    if (result && result.ok && result.outcome === 'answered') {
+      return {
+        text: result.text,
+        model: result.model,
+        providerId: chosen.providerId,
+        label: `${chosen.providerId} / ${result.model}`,
+        latencyMs: result.latencyMs,
+      };
+    }
+    lastFailure = result?.error ?? `${chosen.providerId} did not answer`;
+  }
+
+  if (lastFailure) console.log('[strata] no model answered this question:', lastFailure);
+  return null;
 }
 
 /**
