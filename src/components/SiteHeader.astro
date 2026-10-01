@@ -147,7 +147,7 @@ const navLinks = links.filter((l) => l.href !== '/search');
         class="w-full bg-transparent px-4 py-3 text-[1.0625rem] focus:outline-none placeholder:text-ink-3"
       />
     </div>
-    <ul
+    <div
       id="palette-results"
       data-palette-results
       role="listbox"
@@ -251,18 +251,24 @@ const navLinks = links.filter((l) => l.href !== '/search');
       input.setAttribute('aria-activedescendant', '');
       all.href = '/search' + (query ? '?q=' + encodeURIComponent(q.trim()) : '');
       if (!items.length) {
-        const li = document.createElement('li');
-        li.className = 'px-3 py-3 text-[0.9375rem] text-ink-3';
-        li.textContent = posts ? 'Nothing matches — try the full search.' : 'Index still loading — try the full search.';
-        list.appendChild(li);
+        const empty = document.createElement('div');
+        empty.setAttribute('role', 'status');
+        empty.className = 'px-3 py-3 text-[0.9375rem] text-ink-3';
+        empty.textContent = posts ? 'Nothing matches — try the full search.' : 'Index still loading — try the full search.';
+        list.appendChild(empty);
         return;
       }
+      /* The link *is* the option. It used to be an <li role="option"> wrapping
+         an <a>, which put aria-selected on the anchor instead of the option and
+         nested an interactive control inside a listbox option — so the active row
+         was never announced. One element, one role: the anchor keeps native
+         click, middle-click and ctrl-click, and Enter still navigates through
+         `items[active]`. */
       items.forEach((it, i) => {
-        const li = document.createElement('li');
-        li.id = 'palette-opt-' + i;
-        li.setAttribute('role', 'option');
         const a = document.createElement('a');
         a.href = it.href;
+        a.id = 'palette-opt-' + i;
+        a.setAttribute('role', 'option');
         a.className =
           'flex items-baseline justify-between gap-3 px-3 py-2 no-underline ' +
           (i === active ? 'bg-sunken text-ink' : 'text-ink-2');
@@ -279,8 +285,7 @@ const navLinks = links.filter((l) => l.href !== '/search');
         // Clicking a row navigates natively; mousedown first so the input
         // blur handler (if any) cannot eat the click.
         a.addEventListener('mousedown', (e) => e.preventDefault());
-        li.appendChild(a);
-        list.appendChild(li);
+        list.appendChild(a);
       });
       paint();
     }
