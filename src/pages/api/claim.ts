@@ -52,8 +52,17 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     });
     if (!sent.ok) {
       console.error('[strata] claim email failed:', sent.error);
+      /* Distinguish the two failures that look identical to the reader, because
+         only one of them is worth retrying.
+           - "domain not verified" (403) means the *sender* is unconfigured. That
+             is ours to fix; asking the writer to try again would send them round
+             the loop forever.
+           - anything else is usually the address, which the writer can fix. */
+      const senderProblem = /not verified|domain/i.test(sent.error);
       return new Response(
-        'The claim was recorded but the email could not be sent. Ask for a new link and try again.',
+        senderProblem
+          ? 'Your claim is recorded, but this site cannot send email yet — the sending address is not verified. Nothing was lost: ask again once mail is working.'
+          : 'The claim was recorded but the email could not be sent. Check the address, or ask for a new link and try again.',
         { status: 502 },
       );
     }
