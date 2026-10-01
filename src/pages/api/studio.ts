@@ -115,7 +115,12 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url }) => {
       return redirect(target.pathname + target.search, 303);
     }
     const post = await getPostById(promoted.postId);
-    return redirect(post ? `/w/${post.slug}` : back, 303);
+    /* Send the writer to the editor, not to the seedling's own article page.
+       Promoting used to land on `/w/<slug>`, which renders the draft read-only,
+       stamped UNPUBLISHED, and — because it is not public yet — offers no way
+       back into the draft. The one moment a writer has just created something,
+       the app threw them at a page with nothing to do on it. */
+    return redirect(post ? `/studio/edit/${post.slug}` : back, 303);
   }
 
   if (input.action === 'reviewed') {

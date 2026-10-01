@@ -205,6 +205,17 @@ const jsonLd = [
       <div class="article-body">
         <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
           <StatusBadge status={post.status} />
+          {
+            /* An author looking at their own seedling needs a way back into it.
+               The badge says UNPUBLISHED and nothing else on the page offers an
+               exit, so the draft was a place a writer could only leave by
+               remembering the editor URL. */
+            isPostAuthor && (
+              <a href={`/studio/edit/${post.slug}`} class="meta no-underline hover:text-accent">
+                Edit draft →
+              </a>
+            )
+          }
           {post.topicName && <a href="/topics" class="meta no-underline hover:text-ink">{post.topicName}</a>}
           <span class="meta">{longDate(post.publishedAt)}</span>
           {
