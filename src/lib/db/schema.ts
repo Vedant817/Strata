@@ -140,6 +140,9 @@ export const posts = sqliteTable(
     /** Work-in-progress {title, dek, blocks} JSON. Written on save, cleared on
      *  publish, never rendered to readers. */
     draftBody: text('draft_body'),
+    /** The permalink this post had on its previous site, when it was imported
+     *  from an archive. Null for anything written here. */
+    originalUrl: text('original_url'),
   },
   (t) => [
     uniqueIndex('posts_slug_uq').on(t.slug),

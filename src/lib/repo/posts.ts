@@ -266,6 +266,9 @@ export interface CreatePostInput {
   seriesId?: string;
   publishedAt?: number;
   seoDescription?: string;
+  /** Where this post lived before it was imported, so inbound links keep
+   *  resolving to something truthful. */
+  originalUrl?: string;
   changeSummary?: string;
   isMajor?: boolean;
   forkedFromId?: string;
@@ -296,6 +299,7 @@ export async function createPost(input: CreatePostInput) {
     seriesId: input.seriesId ?? null,
     seoDescription: input.seoDescription ?? input.dek ?? '',
     forkedFromId: input.forkedFromId ?? null,
+    originalUrl: input.originalUrl ?? null,
   });
 
   await database.insert(postVersions).values({

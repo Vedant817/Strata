@@ -206,6 +206,17 @@ const askCaveats: Record<string, string> = Object.fromEntries(
 ) as Record<string, string>;
 const askCaveatJson = JSON.stringify(askCaveats);
 
+/** Just the host, so the byline says "originally at old.example.org" rather
+ *  than printing a whole URL a second time. Falls back to the raw string when
+ *  the stored value will not parse. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./, '');
+  } catch {
+    return url.slice(0, 40);
+  }
+}
+
 const title = isViewingOld ? `${post.title} (revision ${view.current.versionNumber})` : post.title;
 const description = post.seoDescription || stripInline(post.dek);
 
@@ -247,6 +258,16 @@ const jsonLd = [
           }
           {post.topicName && <a href="/topics" class="meta no-underline hover:text-ink">{post.topicName}</a>}
           <span class="meta">{longDate(post.publishedAt)}</span>
+          {
+            /* Where this post used to live. Years of other people's links point
+               at the old address, and the least we can do for someone who
+               followed one is tell them where they have landed. */
+            post.originalUrl && (
+              <a href={post.originalUrl} rel="nofollow noopener" target="_blank" class="meta no-underline hover:text-ink">
+                originally at {hostOf(post.originalUrl)}
+              </a>
+            )
+          }
           {
             view.current.versionNumber > 1 && (
               <span class="meta">
@@ -802,12 +823,12 @@ const jsonLd = [
               {myHighlights.map((h) => (
                 <li class="border-l-2 border-accent pl-3">
                   <p class="text-[0.9375rem] leading-relaxed text-ink-2">{h.text}</p>
-                  <p class="meta mt-1.5">
-                    <a href={`/w/${h.postSlug}`} class="no-underline hover:text-ink">
-                      {h.postTitle}
-                    </a>{' '}
-                    · {ago(h.createdAt)}
-                  </p>
+                  <p class="meta">
+            <a href={`/w/${post.slug}`} class="no-underline hover:text-ink">
+              {post.title}
+            </a>{' '}
+            · {ago(h.createdAt)}
+          </p>
                   {/* A highlight you cannot take back is a decision made for you.
                       This posts the same span back to the toggle endpoint, which
                       removes it, and drops you back here on the redirect. */}

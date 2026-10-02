@@ -230,20 +230,87 @@ const claimPath = activeToken ? `/claim/${activeToken}` : null;
         }
       </section>
 
-      <section>
-        <h2 class="text-xl">Importing an archive</h2>
-        <p class="mt-3 text-[1.0625rem] leading-relaxed text-ink-2">
-          Switching cost is the archive, so import is step one and it has to be excellent. Substack,
-          Medium, Dev.to, Hashnode, Ghost export, WordPress XML, Google Docs and plain Markdown
-          folders are all supported in the roadmap, and original publication dates and inbound links
-          are preserved.
-        </p>
-        <p class="mt-3 text-[0.9375rem] leading-relaxed text-ink-2">
-          The first pass adds layer tags, a lifecycle state, and a suggested changelog, so you are not
-          starting from a blank editor. Bring the archive; the argument for switching is that
-          everything you published finally has somewhere to keep changing.
-        </p>
-      </section>
+      {
+        identity.userId ? (
+          <section id="import">
+            <h2 class="text-xl">Importing an archive</h2>
+            <p class="mt-3 text-[1.0625rem] leading-relaxed text-ink-2">
+              Switching cost is the archive, so import is step one. Bring Markdown with front
+              matter — what Substack, Hashnode, Dev.to, Obsidian and Ghost all reduce to — or a
+              WordPress XML export. Original publication dates and the address each post used to
+              live at are kept, because a post re-dated to today is not an import, it is a lie about
+              when you believed something.
+            </p>
+
+            <div class="mt-5 border border-rule bg-surface p-4" data-import>
+              <label class="meta block" for="import-files">
+                Markdown (.md, .markdown, .mdx, .txt) or WordPress XML (.xml)
+              </label>
+              <input
+                id="import-files"
+                type="file"
+                multiple
+                accept=".md,.markdown,.mdx,.txt,.xml,text/markdown,text/plain,application/xml,text/xml"
+                class="mt-2 block w-full text-[0.9375rem] file:mr-3 file:border file:border-rule file:bg-paper file:px-3 file:py-1.5"
+              />
+
+              <details class="mt-4">
+                <summary class="meta cursor-pointer text-ink-3 hover:text-ink">
+                  Or paste one post
+                </summary>
+                <label class="sr-only" for="import-paste">
+                  Paste a post
+                </label>
+                <textarea
+                  id="import-paste"
+                  rows="8"
+                  placeholder="Paste Markdown with front matter…"
+                  class="mt-2 w-full resize-y border border-rule bg-paper px-3 py-2 text-[0.9375rem] leading-relaxed focus:border-accent focus:outline-none"
+                />
+              </details>
+
+              <label class="mt-4 flex items-center gap-2 text-[0.9375rem] text-ink-2">
+                <input type="checkbox" data-import-draft class="h-4 w-4 accent-[var(--accent)]" />
+                Import as drafts — keep the original dates off the listing until I review them
+              </label>
+
+              <div class="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  data-import-go
+                  class="border border-ink bg-ink px-3 py-1.5 text-[0.9375rem] text-paper transition-colors hover:border-accent hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Import
+                </button>
+                <p class="meta" data-import-status aria-live="polite" />
+              </div>
+
+              <div class="mt-4" data-import-results hidden />
+            </div>
+
+            <p class="mt-4 text-[0.9375rem] leading-relaxed text-ink-2">
+              Imported posts land as <strong>budding</strong>, not evergreen: the content is real but
+              nobody here has checked it, and this publication does not mark something as maintained
+              without a reason. Every import records where it came from in the revision log, so you can
+              see what was inferred and change any of it in the editor.
+            </p>
+          </section>
+        ) : (
+          <section>
+            <h2 class="text-xl">Importing an archive</h2>
+            <p class="mt-3 text-[1.0625rem] leading-relaxed text-ink-2">
+              Switching cost is the archive, so import is step one and it has to be excellent.
+              Markdown with front matter — what Substack, Medium, Dev.to, Hashnode and Ghost all
+              reduce to — and WordPress XML are supported, with original publication dates and
+              inbound links preserved.
+            </p>
+            <p class="mt-3 text-[0.9375rem] leading-relaxed text-ink-2">
+              Claim a handle above and the import opens up. Bring the archive; the argument for
+              switching is that everything you published finally has somewhere to keep changing.
+            </p>
+          </section>
+        )
+      }
 
       <p class="border-t border-rule pt-6 text-[0.9375rem] text-ink-2">
         Still interested?{' '}
@@ -258,4 +325,136 @@ const claimPath = activeToken ? `/claim/${activeToken}` : null;
       </p>
     </div>
   </div>
+
+  <script is:inline>
+    (() => {
+      /* Archive import.
+         Files are read in the browser with File.text() and sent as JSON, so the
+         server parses exactly the bytes that were on disk and nothing is written
+         to a temp directory on the way. Every outcome is listed per file: an
+         import that quietly skipped half an archive is worse than one that
+         failed loudly, and "which of my 90 posts did you actually take?" is the
+         first question anybody asks. */
+      const root = document.querySelector('[data-import]');
+      if (!root) return;
+      const input = document.getElementById('import-files');
+      const paste = document.getElementById('import-paste');
+      const asDraft = root.querySelector('[data-import-draft]');
+      const go = root.querySelector('[data-import-go]');
+      const status = root.querySelector('[data-import-status]');
+      const results = root.querySelector('[data-import-results]');
+      if (!input || !go || !status || !results) return;
+
+      const MAX_BYTES = 512 * 1024;
+
+      function say(text) {
+        status.textContent = text;
+      }
+
+      async function send(files) {
+        if (files.length === 0) {
+          say('Choose a file, or paste a post, first.');
+          return;
+        }
+        go.disabled = true;
+        results.hidden = true;
+        results.innerHTML = '';
+        say(`Reading ${files.length} file${files.length === 1 ? '' : 's'}…`);
+        try {
+          const res = await fetch('/api/import', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              files,
+              asDraft: asDraft ? asDraft.checked : false,
+            }),
+          });
+          const body = await res.json();
+          if (!res.ok) {
+            say('');
+            render([{ filename: 'request', imported: false, reason: body.error ?? 'Import failed.' }], 0, 0);
+            return;
+          }
+          say(`Imported ${body.imported} of ${body.batch}.`);
+          render(body.results, body.imported, body.failed);
+          if (body.imported > 0) input.value = '';
+        } catch {
+          say('The import could not be sent. Check your connection and try again.');
+        } finally {
+          go.disabled = false;
+        }
+      }
+
+      function render(rows, imported, failed) {
+        results.hidden = false;
+        results.innerHTML = '';
+        const list = document.createElement('ul');
+        list.className = 'mt-3 space-y-2 border-t border-rule pt-3 text-[0.875rem]';
+        for (const r of rows) {
+          const li = document.createElement('li');
+          li.className = 'border-l-2 pl-3 ' + (r.imported ? 'border-pine' : 'border-danger');
+
+          const head = document.createElement('p');
+          head.className = 'font-medium';
+          head.textContent = r.imported ? r.title || r.filename : `${r.filename} — not imported`;
+          li.appendChild(head);
+
+          const meta = document.createElement('p');
+          meta.className = 'meta mt-0.5';
+          if (r.imported) {
+            const bits = [r.url];
+            if (r.publishedAt) {
+              bits.push(`original date kept: ${new Date(r.publishedAt).toISOString().slice(0, 10)}`);
+            }
+            if (r.draft) bits.push('saved as a draft');
+            meta.textContent = bits.filter(Boolean).join(' · ');
+          } else {
+            meta.className = 'meta mt-0.5 text-danger';
+            meta.textContent = r.reason ?? 'Unknown reason.';
+          }
+          li.appendChild(meta);
+
+          for (const note of r.inferred ?? []) {
+            const p = document.createElement('p');
+            p.className = 'meta mt-0.5';
+            p.textContent = note;
+            li.appendChild(p);
+          }
+          list.appendChild(li);
+        }
+        results.appendChild(list);
+
+        if (imported > 0) {
+          const p = document.createElement('p');
+          p.className = 'mt-3 text-[0.875rem]';
+          const a = document.createElement('a');
+          a.href = '/studio';
+          a.className = 'text-ink underline hover:text-accent';
+          a.textContent = 'Open the studio →';
+          p.appendChild(a);
+          results.appendChild(p);
+        }
+        if (failed > 0) {
+          const p = document.createElement('p');
+          p.className = 'meta mt-2';
+          p.textContent = `${failed} file${failed === 1 ? '' : 's'} did not make it in. The reasons are above.`;
+          results.appendChild(p);
+        }
+      }
+
+      go.addEventListener('click', async () => {
+        const files = [];
+        for (const f of Array.from(input.files ?? [])) {
+          if (f.size > MAX_BYTES) {
+            say(`${f.name} is larger than 512KB and was skipped.`);
+            continue;
+          }
+          files.push({ filename: f.name, content: await f.text() });
+        }
+        const pasted = paste?.value.trim();
+        if (pasted) files.push({ filename: 'pasted-post.md', content: pasted });
+        await send(files);
+      });
+    })();
+  </script>
 </Base>
