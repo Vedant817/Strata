@@ -9,7 +9,8 @@ Every publishing tool optimizes the moment of publishing. Strata optimizes the f
 - **Posts are maintained, not published.** Revisions are versioned, diffable, and attributable. Readers who saw the old version get told what moved (revision subscriptions) instead of discovering staleness by accident.
 - **One post, three readers.** Blocks carry depth layers — skim the argument, read it properly, or study the footnotes — so a single post serves three altitudes instead of alienating two of them.
 - **Arguments survive rewrites.** Notes attach to a sentence *and* the revision it belonged to, with anchor resolution that survives edits. Accept a correction and it folds into history as an attributed amendment.
-- **Ask answers from the post, or refuses.** Extractive by default (quotes or "not covered"); a model may summarize those quotes behind per-provider caps and breakers, never from outside knowledge.
+- **Ask answers from the post, or refuses.** Grounded in the retrieved passages and attributed to the model that answered; a reader can pick a provider and model, and automatic stays on free-tier models. It never draws on outside knowledge.
+- **Bring your archive, keep your dates.** Markdown with front matter and WordPress XML import as budding drafts with their original publication dates and their old permalinks intact.
 - **No engagement machinery.** No likes, no follower counts, no trending, no algorithmic feed. Empathy analytics are aggregate-only with a 20-reader floor.
 - **Zero client JavaScript on the reading path.** No framework runtime — interactions are a few hundred bytes of inline script. Syntax highlighting, charts, and the search palette are all server-rendered.
 
