@@ -224,6 +224,48 @@ export const postLinks = sqliteTable(
   ],
 );
 
+/**
+ * Webmentions: posts elsewhere on the web that link here.
+ *
+ * Deliberately *not* the fediverse. The plan defers fediverse because
+ * distribution is not the product and it needs a live corpus first. This is the
+ * part that is actually product: a reader seeing that their own site is being
+ * linked to, inside the same reading loop as notes and corrections, rather than
+ * on a dashboard nobody opens.
+ *
+ * `source` is a URL someone else controls, so every field here is untrusted text
+ * and is rendered as text, never as markup. `verified_at` is set once we have
+ * confirmed the source really does contain a link to the target — an unverified
+ * mention is kept but visibly marked, because a mention you cannot substantiate
+ * is indistinguishable from spam.
+ */
+export const webmentions = sqliteTable(
+  'webmentions',
+  {
+    id: text('id').primaryKey(),
+    postId: text('post_id')
+      .notNull()
+      .references(() => posts.id, { onDelete: 'cascade' }),
+    source: text('source').notNull(),
+    sourceTitle: text('source_title').notNull().default(''),
+    sourceAuthor: text('source_author'),
+    sourceAuthorUrl: text('source_author_url'),
+    target: text('target').notNull(),
+    /** 'mention' | 'reply' | 'like' | 'repost', per the Webmention vocabulary. */
+    kind: text('kind', { enum: ['mention', 'reply', 'like', 'repost'] })
+      .notNull()
+      .default('mention'),
+    verifiedAt: integer('verified_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [
+    index('webmentions_post_idx').on(t.postId, t.createdAt),
+    // One row per (post, source, target): the same site re-sending its
+    // endpoint response must not multiply the mention.
+    uniqueIndex('webmentions_source_idx').on(t.postId, t.source, t.target),
+  ],
+);
+
 export const topics = sqliteTable('topics', {
   id: text('id').primaryKey(),
   slug: text('slug').notNull(),

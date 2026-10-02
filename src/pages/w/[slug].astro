@@ -15,6 +15,7 @@ import {
 } from '../../lib/repo/posts';
 import { getIdentity } from '../../lib/repo/auth';
 import { countParticipants, listAnnotations, myReactions, voterKeyFor } from '../../lib/repo/annotations';
+import { listMentions } from '../../lib/repo/webmentions';
 import { isSaved, memoryKeyFor } from '../../lib/repo/reader';
 import { getMyHighlights, getPostHighlights } from '../../lib/repo/highlights';
 import { myReadingLists } from '../../lib/repo/taxonomy';
@@ -81,6 +82,7 @@ const { newer, older } = await getAdjacent(post.id);
 
 // Marginalia, resolved against the text the reader is actually looking at.
 const blockTexts = new Map(doc.map((b) => [b.id, blockToPlainText(b)]));
+const mentions = await listMentions(post.id);
 const allNotes = await listAnnotations(post.id, blockTexts, {
   anonId,
   authorId: identity.userId,
@@ -248,6 +250,8 @@ const jsonLd = [
 ---
 
 <Base title={title} description={description} ogType="article" ogImage={`/og/${post.slug}-diff.png`} prefs={prefs} jsonLd={jsonLd}>
+  <link rel="webmention" href={`/w/${post.slug}/webmention.xml`} />
+  <link rel="pingback" href={`/w/${post.slug}/webmention.xml`} />
   <article data-depth-host data-depth={depth} data-post-id={post.id} data-version={view.current.versionNumber}>
     <header class="shell border-b border-rule pt-10 pb-8">
       <div class="article-body">
@@ -945,6 +949,41 @@ const jsonLd = [
       )
     }
   </article>
+
+  {
+    mentions.length > 0 && (
+      <aside class="shell mt-12 max-w-2xl border-t border-rule pt-8" aria-labelledby="mentions-h">
+        <h2 id="mentions-h" class="text-xl">
+          Linked from {mentions.length} other {mentions.length === 1 ? 'page' : 'pages'}
+        </h2>
+        <ul class="mt-4 divide-y divide-rule border-y border-rule">
+          {mentions.map((m) => (
+            <li class="py-3">
+              <a href={m.source} rel="noopener nofollow ugc" class="group block no-underline">
+                <p class="text-[0.9375rem] group-hover:text-accent">
+                  {m.sourceTitle || `A page on ${m.host}`}
+                </p>
+                <p class="meta mt-1">
+                  {m.kind}
+                  {' · '}
+                  {m.host}
+                  {/* An unverified mention is somebody's assertion that they linked
+                      here. Showing it as fact would let anyone claim credit for
+                      linking, so it is marked rather than asserted. */}
+                  {m.verified ? '' : ' · unverified link'}
+                </p>
+              </a>
+            </li>
+          ))}
+        </ul>
+        <p class="meta mt-3">
+          <a href={`/w/${post.slug}/webmention.xml`} class="underline decoration-rule underline-offset-4 hover:decoration-accent">
+            This post&rsquo;s webmention feed →
+          </a>
+        </p>
+      </aside>
+    )
+  }
 </Base>
 
 <script>
