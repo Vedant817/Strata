@@ -25,6 +25,8 @@
  */
 
 import { defineMiddleware } from 'astro:middleware';
+import { SESSION_COOKIE } from './lib/repo/auth';
+import { touchSession } from './lib/repo/device-sessions';
 
 /** Routes whose HTML is identical for every visitor. */
 const PUBLIC_EXACT = new Set([
@@ -56,6 +58,18 @@ function isPublic(pathname: string): boolean {
 }
 
 export const onRequest = defineMiddleware(async (context, next) => {
+  /* Record which device a session belongs to. Here rather than in
+     `getIdentity` because that function only ever sees cookies — the
+     user-agent lives on the request. Throttled to once per session per ten
+     minutes, so it is not a write on every page view. */
+  const token = context.cookies.get(SESSION_COOKIE)?.value;
+  if (token) {
+    await touchSession(token, context.request.headers.get('user-agent')).catch(() => {
+      // Never let bookkeeping fail a request. A missing device label is a
+      // cosmetic problem; a 500 on someone's article is a real one.
+    });
+  }
+
   const response = await next();
   const { pathname } = context.url;
 

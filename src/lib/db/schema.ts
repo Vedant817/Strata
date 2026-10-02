@@ -322,6 +322,31 @@ export const sessionsMeta = sqliteTable('sessions_meta', {
   lastSeenAt: integer('last_seen_at'),
 });
 
+/**
+ * Single-use WebAuthn challenges.
+ *
+ * In a table rather than a signed cookie, deliberately. The challenge is the
+ * thing that proves the assertion belongs to *this* ceremony; a stateless cookie
+ * can be replayed for as long as its signature is valid, and on a multi-instance
+ * deploy there is no memory to burn in. `used_at` makes replay a lookup miss
+ * rather than a comparison.
+ *
+ * `user_id` is null for a login ceremony, where the relying party must not leak
+ * whether the handle exists before the authenticator has spoken.
+ */
+export const webauthnChallenges = sqliteTable(
+  'webauthn_challenges',
+  {
+    id: text('id').primaryKey(),
+    challenge: text('challenge').notNull(),
+    userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    purpose: text('purpose', { enum: ['register', 'authenticate'] }).notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    usedAt: integer('used_at', { mode: 'timestamp_ms' }),
+  },
+  (t) => [index('webauthn_challenges_expiry_idx').on(t.expiresAt)],
+);
+
 export const topics = sqliteTable('topics', {
   id: text('id').primaryKey(),
   slug: text('slug').notNull(),

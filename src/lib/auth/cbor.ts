@@ -21,7 +21,7 @@ const MAX_BYTES = 65_536;
 
 export class CborError extends Error {}
 
-type Cbor =
+export type Cbor =
   | number
   | string
   | boolean
@@ -164,6 +164,8 @@ export interface ParsedAttestation {
   aaguid: string;
   signCount: number;
   userVerified: boolean;
+  /** Hex SHA-256 of the relying party id, straight from the signed bytes. */
+  rpIdHash: string;
   backupEligible: boolean;
   backupState: boolean;
 }
@@ -244,7 +246,7 @@ export function parseAttestationObject(bytes: Uint8Array): ParsedAttestation {
     backupEligible: (flags & 0x08) !== 0,
     backupState: (flags & 0x10) !== 0,
     rpIdHash,
-  } as ParsedAttestation & { rpIdHash: string };
+  };
 }
 
 /** Assert `data` was signed by `coseKey` over `signature`. */
