@@ -80,8 +80,17 @@ export function chatOnly(models: CatalogModel[]): CatalogModel[] {
 }
 
 /**
+ * Groq publishes no price field, so "free" there can only mean "this key's quota
+ * will absorb it" — not a guarantee we checked. This returns the wording the
+ * picker should use, so the site never implies a promise the API cannot support.
+ */
+export function freeClaimCaveat(providerId: string): string | null {
+  if (getProvider(providerId)?.pricingPublished !== false) return null;
+  return 'This provider publishes no per-model pricing, so these are the models your key can reach — free depends on your quota, not on a guarantee we can check.';
+}
+
+/**
  * Order a catalogue so the models we would rather use appear first.
- *
  * The provider lists whatever it feels like, so a reader picking from it gets
  * `apodex-1.1-mini` or an Arabic-only Orpheus as their first suggestion. Those
  * will answer, but nobody chose them on purpose. Promotion order comes from

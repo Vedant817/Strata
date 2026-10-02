@@ -20,7 +20,7 @@ import { getMyHighlights, getPostHighlights } from '../../lib/repo/highlights';
 import { myReadingLists } from '../../lib/repo/taxonomy';
 import { askPost } from '../../lib/repo/ask';
 import { PROVIDERS } from '../../lib/ai/providers';
-import { houseKeyFor } from '../../lib/ai/catalog';
+import { houseKeyFor, freeClaimCaveat } from '../../lib/ai/catalog';
 import { resolveKey } from '../../lib/repo/providerKeys';
 import { blockToPlainText } from '../../lib/blocks';
 import { resolvePrefs, DEPTH_COOKIE, ensureAnonId, type Depth } from '../../lib/prefs';
@@ -188,7 +188,6 @@ const askResult = askAsked
   : null;
 
 /** Providers this reader could actually use: their own keys, plus the owner's. */
-/** Providers this reader could actually use: their own keys, plus the owner's. */
 const readerHasKey = new Set<string>();
 if (identity.userId) {
   for (const p of PROVIDERS) {
@@ -196,6 +195,16 @@ if (identity.userId) {
   }
 }
 const askProviders = PROVIDERS.filter((p) => readerHasKey.has(p.id) || Boolean(houseKeyFor(p.id)));
+/**
+ * Per-provider honesty about the word "free". OpenRouter publishes prices, so
+ * offering only zero-cost models is a promise we can keep. Groq publishes no
+ * price field, so the same sentence would be a claim we cannot check. The
+ * picker says which one it is making.
+ */
+const askCaveats: Record<string, string> = Object.fromEntries(
+  askProviders.map((p) => [p.id, freeClaimCaveat(p.id)]).filter(([, v]) => Boolean(v)),
+) as Record<string, string>;
+const askCaveatJson = JSON.stringify(askCaveats);
 
 const title = isViewingOld ? `${post.title} (revision ${view.current.versionNumber})` : post.title;
 const description = post.seoDescription || stripInline(post.dek);
@@ -267,7 +276,7 @@ const jsonLd = [
         </p>
       </div>
     </header>
-    <script is:inline>
+    <script is:inline define:vars={{ askCaveatJson }}>
   (() => {
     /* Fill the model box from the live catalogue when a provider is chosen.
        A text input with a datalist rather than a <select>: catalogues churn
@@ -284,7 +293,23 @@ const jsonLd = [
       const provider = document.getElementById('ask-provider');
       const model = document.getElementById('ask-model');
       const options = document.querySelector('[data-model-options]');
+      const caveat = document.querySelector('[data-ask-caveat]');
       if (!root || !provider || !model || !options) return;
+
+      /* Tell the reader when this provider cannot actually tell us which models
+         are free, instead of letting "free" imply a guarantee. */
+      let notes = {};
+      try {
+        notes = JSON.parse(askCaveatJson || '{}');
+      } catch {}
+      function paintCaveat() {
+        if (!caveat) return;
+        const text = provider.value ? notes[provider.value] : '';
+        caveat.textContent = text ?? '';
+        caveat.hidden = !text;
+      }
+      provider.addEventListener('change', paintCaveat);
+      paintCaveat();
 
       let token = 0;
       async function load() {
@@ -712,8 +737,9 @@ const jsonLd = [
                 </div>
                 <p class="mt-1.5 text-[0.75rem] leading-snug text-ink-3">
                   Your key is used for your provider if you added one, otherwise the
-                  site's. Automatic is free-tier only.
+                  site's. Automatic stays on free-tier models only.
                 </p>
+                <p class="mt-1 text-[0.75rem] leading-snug text-ink-3" data-ask-caveat hidden></p>
               </details>
             )
           }

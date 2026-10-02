@@ -31,6 +31,15 @@ export interface ProviderDef {
    * tiers at runtime instead of hardcoding one that rots.
    */
   catalog: boolean;
+  /**
+   * True when that catalogue also says which models are free. OpenRouter
+   * publishes prompt and completion prices, so "free" is a fact we can check.
+   * Groq publishes no price field at all, so there "free" can only mean "this
+   * key's quota will absorb it" — a different and much weaker claim. The picker
+   * says which of the two it is making rather than implying a guarantee it
+   * cannot keep.
+   */
+  pricingPublished: boolean;
   docsUrl: string;
 }
 
@@ -44,6 +53,7 @@ export const PROVIDERS: ProviderDef[] = [
     fallbackModel: 'claude-sonnet-4-5',
     note: 'Claude models. Required for the model-backed Ask on the free plan.',
     catalog: false,
+    pricingPublished: false,
     docsUrl: 'https://docs.anthropic.com',
   },
   {
@@ -55,6 +65,7 @@ export const PROVIDERS: ProviderDef[] = [
     fallbackModel: 'gpt-4o-mini',
     note: 'GPT models. A ChatGPT Plus subscription is not an API key — billing is separate.',
     catalog: true,
+    pricingPublished: true,
     docsUrl: 'https://platform.openai.com/docs',
   },
   {
@@ -66,6 +77,7 @@ export const PROVIDERS: ProviderDef[] = [
     fallbackModel: 'llama-3.3-70b-versatile',
     note: 'Very fast open models. Only free-tier models are offered.',
     catalog: true,
+    pricingPublished: false,
     docsUrl: 'https://console.groq.com/docs',
   },
   {
@@ -77,6 +89,7 @@ export const PROVIDERS: ProviderDef[] = [
     fallbackModel: 'meta-llama/llama-3.3-70b-instruct:free',
     note: 'One key, many providers. Only models tagged free are offered.',
     catalog: true,
+    pricingPublished: true,
     docsUrl: 'https://openrouter.ai/docs',
   },
   {
@@ -88,6 +101,7 @@ export const PROVIDERS: ProviderDef[] = [
     fallbackModel: 'deepseek-chat',
     note: 'Cheap, strong at code and reasoning.',
     catalog: true,
+    pricingPublished: true,
     docsUrl: 'https://api-docs.deepseek.com',
   },
   {
@@ -99,6 +113,7 @@ export const PROVIDERS: ProviderDef[] = [
     fallbackModel: 'moonshot-v1-8k',
     note: 'Long context; good with long documents.',
     catalog: true,
+    pricingPublished: true,
     docsUrl: 'https://platform.moonshot.ai/docs',
   },
   {
@@ -110,6 +125,7 @@ export const PROVIDERS: ProviderDef[] = [
     fallbackModel: 'MiniMax-Text-01',
     note: 'Long-context text models.',
     catalog: true,
+    pricingPublished: true,
     docsUrl: 'https://platform.minimax.io/docs',
   },
   {
@@ -121,6 +137,7 @@ export const PROVIDERS: ProviderDef[] = [
     fallbackModel: 'glm-4-flash',
     note: 'Free flash tier available for experimentation.',
     catalog: true,
+    pricingPublished: true,
     docsUrl: 'https://docs.bigmodel.cn',
   },
   {
@@ -132,6 +149,7 @@ export const PROVIDERS: ProviderDef[] = [
     fallbackModel: 'grok-2-latest',
     note: 'Grok models.',
     catalog: true,
+    pricingPublished: true,
     docsUrl: 'https://docs.x.ai',
   },
   {
@@ -143,6 +161,7 @@ export const PROVIDERS: ProviderDef[] = [
     fallbackModel: 'mistral-small-latest',
     note: 'European models; strong on cost.',
     catalog: true,
+    pricingPublished: true,
     docsUrl: 'https://docs.mistral.ai',
   },
   {
@@ -154,6 +173,7 @@ export const PROVIDERS: ProviderDef[] = [
     fallbackModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
     note: 'Open-weight models, pay per token.',
     catalog: true,
+    pricingPublished: true,
     docsUrl: 'https://docs.together.ai',
   },
 ];
