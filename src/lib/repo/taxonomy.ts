@@ -54,6 +54,10 @@ const baseSelect = {
   authorHandle: users.handle,
   authorName: users.displayName,
   topicName: topics.name,
+  /* Selected alongside the name because every feed and every grouping needs to
+     match on the stable slug, not on the display label — renaming a topic must
+     not silently empty its feed. */
+  topicSlug: topics.slug,
 };
 
 export type PostCard = Awaited<ReturnType<typeof listAll>>[number];

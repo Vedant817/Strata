@@ -33,8 +33,16 @@ const posts = await listAll();
         const items = posts.filter((p) => p.topicId === topic.id);
         return (
           <section id={topic.slug} class="mb-16 scroll-mt-24 last:mb-0">
-            <div class="border-b border-rule pb-3">
+            <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-rule pb-3">
               <h2 class="text-xl">{topic.name}</h2>
+              {/* A feed nobody can reach is not a feed. This is how a reader
+                  finds the per-topic endpoint without knowing the URL scheme. */}
+              <a
+                href={`/topics/${topic.slug}/rss.xml`}
+                class="text-[0.75rem] uppercase tracking-widest text-ink-3 hover:text-ink-1"
+              >
+                RSS
+              </a>
             </div>
             <p class="mt-2 max-w-xl text-[0.9375rem] text-ink-2">{topic.blurb}</p>
             <div class="mt-5">
