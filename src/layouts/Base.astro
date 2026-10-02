@@ -52,6 +52,11 @@ const graph = jsonLd.length
     {noindex && <meta name="robots" content="noindex, nofollow" />}
     <link rel="canonical" href={canonicalUrl} />
     <meta name="theme-color" content={prefs.theme === 'ink' ? '#100f0d' : '#faf9f5'} />
+    {/* Declared so a phone can offer Strata in its share sheet. The share
+        target runs on GET specifically because a POST target would require a
+        service worker to intercept the navigation — and this site ships zero
+        workers, by design. */}
+    <link rel="manifest" href="/manifest.webmanifest" />
 
     <meta property="og:type" content={ogType} />
     <meta property="og:site_name" content="Strata" />

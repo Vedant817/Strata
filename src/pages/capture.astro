@@ -1,0 +1,228 @@
+---
+import Base from '../layouts/Base.astro';
+import { getIdentity } from '../lib/repo/auth';
+import { ANON_COOKIE } from '../lib/prefs';
+import { listCaptures } from '../lib/repo/studio';
+
+/**
+ * The capture door.
+ *
+ * This is the target of the PWA share target, so the one thing it must get right
+ * is the handoff. A phone's share sheet — iOS and Android both — runs OCR on a
+ * screenshot *before* handing text to an app, which is why `share` and
+ * `screenshot` need no vision model here. Shipping one would cost hundreds of
+ * kilobytes in the reading path to re-derive text the operating system already
+ * extracted. So the manifest hands us plain text and this page turns it into a
+ * draft fragment the writer confirms.
+ *
+ * Nothing is saved without a deliberate submit. A share can fire from a
+ * half-finished thought, and an inbox you cannot see is worse than one that
+ * asks first.
+ */
+
+const identity = await getIdentity(Astro.cookies);
+const anonId = Astro.cookies.get(ANON_COOKIE)?.value ?? identity.anonId ?? '';
+
+// Share sheets send `text`; some send only a URL, some only a title.
+const q = Astro.url.searchParams;
+const url = (q.get('url') ?? '').trim();
+const title = (q.get('title') ?? '').trim();
+const text = (q.get('text') ?? '').trim();
+const shared = url ? `${title || url}\n${url}` : title;
+const incoming = [text, shared].filter(Boolean).join('\n\n');
+
+const claimed = Boolean(identity.userId);
+const recent = claimed ? await listCaptures(identity.userId, 'inbox') : [];
+
+const suggested = incoming
+  ? incoming
+  : 'The sentence you do not want to lose…';
+---
+
+<Base title="Capture" description="Get a fragment down before it is gone.">
+  <section class="shell max-w-2xl py-12">
+    <p class="meta">Writer Studio</p>
+    <h1 class="mt-3 text-3xl">Capture</h1>
+
+    {
+      incoming ? (
+        <p
+          class="mt-4 border-l-2 border-accent pl-3 text-[0.9375rem] leading-relaxed text-ink-2"
+          role="status"
+        >
+          Received {incoming.length} characters from your share sheet. Nothing is
+          saved until you press Capture.
+        </p>
+      ) : (
+        <p class="mt-4 max-w-prose text-[0.9375rem] leading-relaxed text-ink-2">
+          The bottleneck is noticing, not publishing. Get it down in seconds and
+          decide what it becomes later.
+        </p>
+      )
+    }
+
+    {
+      !claimed ? (
+        <div class="mt-8 border border-rule p-6">
+          <p class="text-[0.9375rem] text-ink-2">
+            Captures belong to a claimed handle, so they survive losing the
+            browser. You can read everything below this box without one.
+          </p>
+          <p class="mt-3 text-[0.9375rem] text-ink-3">
+            The text above was not lost — copy it, then{' '}
+            <a href="/claim" class="underline decoration-rule underline-offset-4 hover:decoration-accent">
+              claim a handle
+            </a>{' '}
+            to start capturing.
+          </p>
+          {incoming && (
+            <pre class="mt-4 max-h-64 overflow-auto whitespace-pre-wrap border border-rule bg-paper p-3 text-[0.875rem]">
+              {incoming}
+            </pre>
+          )}
+        </div>
+      ) : (
+        <>
+          <form method="post" action="/api/studio" class="mt-8 border border-rule p-4">
+            <input type="hidden" name="action" value="capture" />
+            {/* A share is the source of record even when the text was extracted
+                from an image by the OS. Recording it honestly is the difference
+                between a capture log you can trust and one you cannot. */}
+            <input type="hidden" name="source" value={incoming ? 'share' : 'scratchpad'} />
+            <label class="meta" for="cap">Fragment</label>
+            <textarea
+              id="cap"
+              name="body"
+              rows={5}
+              maxlength={4000}
+              required
+              data-voice-target
+              placeholder={suggested}
+              class="mt-1.5 w-full resize-y border border-rule bg-paper px-3 py-2 text-[0.9375rem] leading-relaxed focus:border-accent focus:outline-none"
+            >{incoming}</textarea>
+
+            <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+              {/* Progressive enhancement only. Without JavaScript, or in a
+                  browser without the API, the button does not appear and the
+                  textarea is a plain textarea. */}
+              <button
+                type="button"
+                data-voice
+                aria-pressed="false"
+                class="hidden border border-rule px-3 py-1.5 text-[0.875rem] transition-colors hover:border-accent"
+              >
+                <span data-voice-label>Dictate</span>
+              </button>
+              <button
+                type="submit"
+                class="ml-auto border border-ink bg-ink px-3 py-1.5 text-[0.875rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+              >
+                Capture
+              </button>
+            </div>
+          </form>
+
+          <p class="meta mt-3">
+            Share this page from your phone's share sheet and text arrives here
+            already extracted — including from a screenshot, because the operating
+            system reads the image before handing it over.
+          </p>
+
+          {
+            recent.length > 0 && (
+              <section class="mt-12">
+                <h2 class="text-xl">In the inbox</h2>
+                <ul class="mt-4 divide-y divide-rule border-y border-rule">
+                  {recent.slice(0, 8).map((c) => (
+                    <li class="py-3">
+                      <p class="text-[0.9375rem] leading-relaxed">{c.body}</p>
+                      <p class="meta mt-1">{c.source}</p>
+                    </li>
+                  ))}
+                </ul>
+                <p class="mt-3 text-[0.875rem]">
+                  <a
+                    href="/studio"
+                    class="underline decoration-rule underline-offset-4 hover:decoration-accent"
+                  >
+                    Sort the whole inbox →
+                  </a>
+                </p>
+              </section>
+            )
+          }
+        </>
+      )
+    }
+  </section>
+</Base>
+
+<script>
+  /**
+   * Dictation, and only dictation.
+   *
+   * `webkitSpeechRecognition` is first-party here in the sense that matters to
+   * the budget: it is a browser API, not a vendor script, and it works only
+   * because the page is served over a secure origin. When it is missing the
+   * button never renders — there is no disabled control pretending to work,
+   * because a dictation button that silently does nothing is worse than no
+   * button at all.
+   */
+  const Ctor =
+    (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+  const btn = document.querySelector<HTMLButtonElement>('[data-voice]');
+  const field = document.querySelector<HTMLTextAreaElement>('[data-voice-target]');
+  const label = document.querySelector<HTMLSpanElement>('[data-voice-label]');
+
+  if (Ctor && btn && field) {
+    const type = Ctor;
+    const rec = new type();
+    rec.lang = document.documentElement.lang || 'en-US';
+    rec.interimResults = true;
+    rec.continuous = true;
+
+    // Appended as the writer speaks rather than replacing the field, so a
+    // dictated fragment never destroys something already typed.
+    let base = '';
+    let running = false;
+
+    rec.onresult = (e: any) => {
+      let said = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) said += e.results[i][0].transcript;
+      }
+      if (said) field.value = (base ? base + ' ' : '') + said.trim();
+    };
+    rec.onend = () => {
+      if (!running) return;
+      running = false;
+      btn.setAttribute('aria-pressed', 'false');
+      if (label) label.textContent = 'Dictate';
+      base = field.value.trim();
+    };
+    rec.onerror = () => {
+      running = false;
+      btn.setAttribute('aria-pressed', 'false');
+      if (label) label.textContent = 'Dictate';
+    };
+
+    btn.classList.remove('hidden');
+    btn.addEventListener('click', () => {
+      if (running) {
+        rec.stop();
+        return;
+      }
+      running = true;
+      base = field.value.trim();
+      btn.setAttribute('aria-pressed', 'true');
+      if (label) label.textContent = 'Stop';
+      try {
+        rec.start();
+      } catch {
+        running = false;
+        btn.setAttribute('aria-pressed', 'false');
+        if (label) label.textContent = 'Dictate';
+      }
+    });
+  }
+</script>

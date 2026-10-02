@@ -238,6 +238,18 @@ const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
             The bottleneck is noticing, not publishing. Get the fragment down
             in seconds; decide what it becomes later.
           </p>
+          <p class="mt-3 text-[0.9375rem]">
+            <a
+              href="/capture"
+              class="underline decoration-rule underline-offset-4 hover:decoration-accent"
+            >
+              Capture from your phone →
+            </a>{' '}
+            <span class="text-ink-3">
+              Dictate, or share text and screenshots into it — the operating system
+              reads the image for you.
+            </span>
+          </p>
           <form method="post" action="/api/studio" class="mt-4 border border-rule p-4">
             <input type="hidden" name="action" value="capture" />
             <label class="meta" for="capture-body">
