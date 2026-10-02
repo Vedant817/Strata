@@ -266,6 +266,62 @@ export const webmentions = sqliteTable(
   ],
 );
 
+/**
+ * Passkeys (WebAuthn).
+ *
+ * Why this exists at all: a claimed handle currently proves itself with an email
+ * round-trip and then sits on a `sessions` row that is invisible and
+ * unrevocable. Passkeys remove the email round-trip for returning readers, and
+ * session management removes the invisible-row problem. Neither replaces the
+ * other.
+ *
+ * `public_key` is the COSE key, base64url — not PEM. Storing PEM would mean
+ * re-parsing on every assertion and a second serialisation format to keep
+ * correct. The credential id is what the authenticator indexes, so it is
+ * uniquely constrained and never displayed.
+ */
+export const passkeys = sqliteTable(
+  'passkeys',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    credentialId: text('credential_id').notNull(),
+    publicKey: text('public_key').notNull(),
+    /**
+     * The authenticator's signature counter. Must only ever increase; a repeat
+     * or decrease means a cloned credential, so it is a hard failure rather
+     * than something to log.
+     */
+    counter: integer('counter').notNull().default(0),
+    label: text('label').notNull().default('Passkey'),
+    transports: text('transports'),
+    createdAt: integer('created_at').notNull().default(now),
+    lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }),
+  },
+  (t) => [
+    uniqueIndex('passkeys_cred_idx').on(t.credentialId),
+    index('passkeys_user_idx').on(t.userId, t.createdAt),
+  ],
+);
+
+/**
+ * Device metadata for a session.
+ *
+ * Split from `sessions` on purpose: the row that authorises a request is the
+ * security-critical one and should not need to carry a user-agent string to
+ * render a "sign out this device" list. Also lets it be populated lazily.
+ */
+export const sessionsMeta = sqliteTable('sessions_meta', {
+  token: text('token')
+    .primaryKey()
+    .references(() => sessions.token, { onDelete: 'cascade' }),
+  userAgent: text('user_agent'),
+  createdAt: integer('created_at'),
+  lastSeenAt: integer('last_seen_at'),
+});
+
 export const topics = sqliteTable('topics', {
   id: text('id').primaryKey(),
   slug: text('slug').notNull(),

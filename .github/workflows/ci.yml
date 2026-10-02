@@ -41,6 +41,12 @@ jobs:
       - name: Artifact prop coercion
         run: npx tsx scripts/check-artifact-props.ts
 
+      # WebAuthn parsing. This decoder reads attacker-supplied attestation bytes,
+      # so its caps and its refusal paths are the security properties, and they
+      # need proving on every build rather than when a keypress goes wrong.
+      - name: WebAuthn CBOR and attestation parsing
+        run: npx tsx scripts/check-webauthn-cbor.ts
+
       - name: Build
         run: npm run build
         env:

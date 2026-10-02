@@ -127,6 +127,13 @@
       "when": 1790743000000,
       "tag": "0017_webmentions",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1790743200000,
+      "tag": "0018_passkeys",
+      "breakpoints": true
     }
   ]
 }
