@@ -31,8 +31,7 @@ const text = (q.get('text') ?? '').trim();
 const shared = url ? `${title || url}\n${url}` : title;
 const incoming = [text, shared].filter(Boolean).join('\n\n');
 
-const claimed = Boolean(identity.userId);
-const recent = claimed ? await listCaptures(identity.userId, 'inbox') : [];
+const recent = identity.userId ? await listCaptures(identity.userId, 'inbox') : [];
 
 const suggested = incoming
   ? incoming
@@ -62,7 +61,7 @@ const suggested = incoming
     }
 
     {
-      !claimed ? (
+      identity.userId ? (
         <div class="mt-8 border border-rule p-6">
           <p class="text-[0.9375rem] text-ink-2">
             Captures belong to a claimed handle, so they survive losing the
