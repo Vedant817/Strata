@@ -181,10 +181,18 @@ const askModelParam = Astro.url.searchParams.get('askModel') ?? '';
 const askProvider = PROVIDERS.some((p) => p.id === askProviderParam) ? askProviderParam : '';
 const askModel = askModelParam.slice(0, 120);
 const askResult = askAsked
-  ? await askPost(post.id, view.current.id, askQuery, identity.userId, 3, {
-      providerId: askProvider || null,
-      model: askModel || null,
-    })
+  ? await askPost(
+      post.id,
+      view.current.id,
+      askQuery,
+      identity.userId,
+      3,
+      {
+        providerId: askProvider || null,
+        model: askModel || null,
+      },
+      anonId,
+    )
   : null;
 
 /** Providers this reader could actually use: their own keys, plus the owner's. */
@@ -769,7 +777,16 @@ const jsonLd = [
             <div class="mt-5 max-w-xl border border-rule bg-surface p-4">
               <p class="meta">You asked</p>
               <p class="mt-1 text-[0.9375rem] font-medium">“{askResult!.question}”</p>
-              {askResult!.matched ? (
+              {askResult!.error ? (
+                /* Never dress a rate limit up as a gap in the article. Telling a
+                   reader their question is "not covered yet" when the truth is
+                   that they have hit a quota would put a lie in the writer's
+                   confusion dashboard and send them off to write something that
+                   is already answered. */
+                <p class="border-l-2 border-rule-strong pl-3 text-[0.9375rem] leading-relaxed text-ink-2" role="status">
+                  {askResult!.error}
+                </p>
+              ) : askResult!.matched ? (
                 <>
                   {askResult!.answer && (
                     <>

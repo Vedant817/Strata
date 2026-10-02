@@ -3,6 +3,7 @@ import { readyDb } from '../db';
 import { asks } from '../db/schema';
 import { nanoid } from '../ids';
 import { answerFromAnyModel } from '../ai/ask';
+import { askCacheKey, checkAskQuota, readAskCache, writeAskCache } from '../ai/ask-limit';
 
 export interface AskPassage {
   blockId: string;
@@ -24,7 +25,11 @@ export interface AskResult {
   /** Which model produced it, e.g. "openrouter / llama-3.3-70b:free". Shown
    *  so a reader knows what summarized their post, and which quota paid. */
   modelLabel: string | null;
-  mode: 'extractive' | 'model';
+  mode: 'extractive' | 'model' | 'rate-limited';
+  /** Why the reader got nothing, when `mode` is not an answer. */
+  error?: string;
+  /** True when this was served from the answer cache rather than re-asked. */
+  cached?: boolean;
 }
 
 /**
@@ -89,10 +94,36 @@ export async function askPost(
   askedById: string | null,
   limit = 3,
   pref?: { providerId?: string | null; model?: string | null },
+  anonId?: string | null,
 ): Promise<AskResult> {
   const started = Date.now();
   const clean = question.trim().slice(0, 500);
   const queries = clean.length >= 2 ? toFtsQueries(clean) : [];
+
+  /* Meter before doing any work.
+     The cache is consulted first so a repeat of a question already answered
+     costs nothing at all — including the quota slot, because it is not a new
+     question, it is the same one being re-read. */
+  const cacheKey = askCacheKey({ postId, versionId, question: clean, ...pref });
+  const memo = readAskCache<AskResult>(cacheKey);
+  if (memo) {
+    return { ...memo, latencyMs: 0, cached: true };
+  }
+
+  const quota = await checkAskQuota(anonId || askedById || 'anonymous');
+  if (!quota.ok) {
+    const note: AskResult = {
+      question: clean,
+      matched: false,
+      passages: [],
+      latencyMs: 0,
+      answer: null,
+      modelLabel: null,
+      mode: 'rate-limited',
+      error: `You have asked ${quota.used} questions in the last hour, which is the limit. Try again in ${Math.ceil(quota.retryAfter / 60)} minute${quota.retryAfter > 120 ? 's' : ''}.`,
+    };
+    return note;
+  }
 
   let passages: AskPassage[] = [];
   if (queries.length > 0) {
@@ -121,7 +152,7 @@ export async function askPost(
   // these passages, so its answer cannot outrun them.
   let answer: string | null = null;
   let modelLabel: string | null = null;
-  let mode: 'extractive' | 'model' = 'extractive';
+  let mode: 'extractive' | 'model' | 'rate-limited' = 'extractive';
   {
     // Wrapped: even an unexpected throw (a DB hiccup in the budget table) must
     // not break answering — the extractive quotes are the floor, always.
@@ -160,11 +191,21 @@ export async function askPost(
       mode,
       latencyMs,
       askedById,
+      anonId: anonId ?? null,
     });
   } catch (err) {
     // Logging must never break answering.
     console.error('[strata] ask log failed:', err);
   }
 
-  return { question: clean, matched, passages, latencyMs, answer, modelLabel, mode };
+const result: AskResult = { question: clean, matched, passages, latencyMs, answer, modelLabel, mode };
+  /* Cache a real answer, not a degraded one.
+     An extractive result is what Ask falls back to when no model was affordable,
+     and that reason is temporary — the budget window rolls over, the key is
+     topped up. Caching it would pin the reader to the worse answer for ten
+     minutes after the good one became available, and would quietly mask an
+     outage as "this is just what the site says". Repeats of an extractive
+     question cost one FTS lookup, which is not worth that trade. */
+  if (mode === 'model') writeAskCache(cacheKey, result);
+  return result;
 }

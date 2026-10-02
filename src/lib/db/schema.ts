@@ -427,9 +427,16 @@ export const asks = sqliteTable(
     mode: text('mode', { enum: ['extractive', 'model'] }).notNull().default('extractive'),
     latencyMs: integer('latency_ms'),
     askedById: text('asked_by_id').references(() => users.id, { onDelete: 'set null' }),
+    /** The pseudonymous browser id when nobody is signed in. Not a person, and
+     *  only ever used to meter and audit anonymous questions. */
+    anonId: text('anon_id'),
     createdAt: integer('created_at').notNull().default(now),
   },
-  (t) => [index('asks_post_idx').on(t.postId), index('asks_block_idx').on(t.postId, t.blockId)],
+  (t) => [
+    index('asks_post_idx').on(t.postId),
+    index('asks_block_idx').on(t.postId, t.blockId),
+    index('asks_anon_idx').on(t.anonId, t.createdAt),
+  ],
 );
 
 /**
