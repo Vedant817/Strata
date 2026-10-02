@@ -1,3 +1,10 @@
+/*
+ * Import parser checks. Run with: npx tsx scripts/check-import.ts
+ *
+ * These are assertions, not a test framework: an import that quietly drops half an
+ * archive is worse than one that fails loudly, and every one of these lines is a
+ * way that has already happened.
+ */
 import {
   parseImportFile,
   parseWordpressXml,
