@@ -34,6 +34,13 @@ jobs:
       - name: Anchor resolution
         run: npm run test:anchors
 
+      # Artifact props are the one place a writer-authored payload is coerced on
+      # the way into a draft. The array case is not hypothetical: an earlier
+      # scalar-only rule emptied the data in every existing curve and breakdown
+      # on the next save.
+      - name: Artifact prop coercion
+        run: npx tsx scripts/check-artifact-props.ts
+
       - name: Build
         run: npm run build
         env:

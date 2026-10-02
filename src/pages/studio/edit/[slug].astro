@@ -46,7 +46,8 @@ const studioError = Astro.url.searchParams.get('studioError');
 const saved = Astro.url.searchParams.get('saved') === '1';
 
 const LAYERS = ['core', 'understand', 'master'] as const;
-const ADDABLE = ['paragraph', 'heading', 'quote', 'code', 'list', 'callout'] as const;
+const ADDABLE = ['paragraph', 'heading', 'quote', 'code', 'list', 'callout', 'interactive'] as const;
+const ARTIFACTS = ['curve', 'breakdown', 'matrix', 'timeline'] as const;
 
 function blockText(b: (typeof doc.blocks)[number]): string {
   if (b.type === 'code') return b.code;
@@ -343,6 +344,54 @@ function blockText(b: (typeof doc.blocks)[number]): string {
                   >
                     {b.text}
                   </textarea>
+                </>
+              ) : b.type === 'interactive' ? (
+                <>
+                  <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label class="meta">
+                      Component
+                      <select
+                        name={`b_${i}_component`}
+                        data-artifact-kind
+                        class="mt-1 block w-full border border-rule bg-paper px-2 py-1 text-[0.875rem] focus:border-accent focus:outline-none"
+                      >
+                        {ARTIFACTS.map((a) => (
+                          <option value={a} selected={b.component === a}>{a}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label class="meta">
+                      Caption
+                      <input
+                        name={`b_${i}_ctitle`}
+                        value={b.title}
+                        maxlength={300}
+                        class="mt-1 block w-full border border-rule bg-paper px-3 py-2 text-[0.875rem] focus:border-accent focus:outline-none"
+                      />
+                    </label>
+                  </div>
+                  <label class="meta mt-3 block">
+                    Props (JSON)
+                    <textarea
+                      name={`b_${i}_props`}
+                      rows={5}
+                      maxlength={4000}
+                      spellcheck="false"
+                      aria-describedby={`b_${i}_props_help`}
+                      class="mt-1 block w-full resize-y border border-rule bg-paper px-3 py-2 font-mono text-[0.8125rem] leading-relaxed focus:border-accent focus:outline-none"
+                    >
+                      {JSON.stringify(b.props ?? {}, null, 2)}
+                    </textarea>
+                  </label>
+                  {/* States the contract on the field itself. An artifact that
+                      renders empty gives a writer nothing to debug, and the
+                      server silently coerces bad JSON to `{}` — so the shape
+                      has to be visible where it is being written. */}
+                  <p id={`b_${i}_props_help`} class="meta mt-1">
+                    Only strings, numbers and booleans are kept. Objects and
+                    arrays are dropped, and malformed JSON saves as an empty
+                    figure rather than failing the whole draft.
+                  </p>
                 </>
               ) : (
                 <p class="mt-2 border-l-2 border-rule-strong pl-3 text-[0.875rem] text-ink-3">

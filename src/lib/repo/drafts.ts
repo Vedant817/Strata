@@ -216,6 +216,17 @@ export async function publishDraft(
           text: (form[`b_${i}_text`] ?? '').slice(0, 20000),
         };
         break;
+      case 'interactive':
+        next = {
+          ...prev,
+          component: ARTIFACT_COMPONENTS.includes((form[`b_${i}_component`] ?? '') as never)
+            ? ((form[`b_${i}_component`] ?? 'curve') as (typeof ARTIFACT_COMPONENTS)[number])
+            : 'curve',
+          title: (form[`b_${i}_ctitle`] ?? '').slice(0, 300),
+          props: parseArtifactPropsForTest(form[`b_${i}_props`], (form[`b_${i}_component`] ?? 'curve') as string),
+          layer,
+        };
+        break;
       default:
         next = { ...prev, layer };
         break;
@@ -231,7 +242,71 @@ export async function publishDraft(
   };
 }
 
-export function blankBlock(type: 'paragraph' | 'heading' | 'quote' | 'code' | 'list' | 'callout'): Block {
+const ARTIFACT_COMPONENTS = ['curve', 'breakdown', 'matrix', 'timeline'] as const;
+
+/**
+ * Artifact props are authored as JSON by the writer, so they have to be treated
+ * as hostile input even though the writer is the author of the post.
+ *
+ * Two limits that are not arbitrary: an artifact is a figure inside an article,
+ * not a document, so the payload is capped; and the accepted shapes are exactly
+ * the ones `Artifact.astro` reads — scalars plus *flat arrays of scalars*, which
+ * every component needs (`measured` is a `number[]`, `breakdown` takes paired
+ * label/number lists). Anything deeper is dropped rather than stored, because a
+ * consumer that expected a flat list would otherwise render `undefined` in the
+ * figure.
+ *
+ * Dropping is only safe because it is explicit. An earlier version of this
+ * function kept scalars alone, which quietly emptied the arrays in every
+ * existing `curve` and `breakdown` the next time a draft was saved.
+ */
+const MAX_PROPS_BYTES = 4000;
+const MAX_ARRAY_LEN = 200;
+
+function scalar(value: unknown): string | number | boolean | null {
+  if (typeof value === 'string') return value.slice(0, 500);
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'boolean') return value;
+  return null;
+}
+
+export function parseArtifactPropsForTest(raw: string | undefined, component: string): Record<string, unknown> {
+  if (!raw || raw.length > MAX_PROPS_BYTES) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,40}$/.test(key)) continue;
+    const one = scalar(value);
+    if (one !== null) {
+      out[key] = one;
+      continue;
+    }
+    if (Array.isArray(value) && value.length <= MAX_ARRAY_LEN) {
+      const list: (string | number | boolean)[] = [];
+      for (const item of value) {
+        const s = scalar(item);
+        // One non-scalar makes the whole array unusable rather than half-right.
+        if (s === null) {
+          list.length = 0;
+          break;
+        }
+        list.push(s);
+      }
+      if (list.length) out[key] = list;
+    }
+  }
+  void component;
+  return out;
+}
+
+export function blankBlock(type: 'paragraph' | 'heading' | 'quote' | 'code' | 'list' | 'callout' | 'interactive'): Block {
   const id = nanoid();
   switch (type) {
     case 'heading':
@@ -242,6 +317,18 @@ export function blankBlock(type: 'paragraph' | 'heading' | 'quote' | 'code' | 'l
       return { id, type: 'code', lang: 'text', code: '', caption: '', layer: 'master' };
     case 'list':
       return { id, type: 'list', ordered: false, items: [''], layer: 'understand' };
+    case 'interactive':
+      // Seeded with an example payload rather than `{}` because an artifact with
+      // no data renders an empty box, and a writer who cannot tell that their
+      // JSON failed has no way to learn the shape.
+      return {
+        id,
+        type: 'interactive',
+        component: 'curve',
+        title: '',
+        props: { label: 'p50', points: '1,2,3' },
+        layer: 'master',
+      };
     case 'callout':
       return { id, type: 'callout', tone: 'note', title: '', text: '', layer: 'understand' };
     default:
