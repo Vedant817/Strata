@@ -1,7 +1,7 @@
 import { chatGrounded } from './client';
-import { houseKeyFor, listModels, chooseChatModel } from './catalog';
+import { houseKeyFor, listModels, chooseChatModel, chatOnly, orderByPreference } from './catalog';
 import { checkBudget, recordCall } from './budget';
-import { getProvider } from './providers';
+import { getProvider, PROVIDERS } from './providers';
 import { chosenModel, resolveKey } from '../repo/providerKeys';
 
 /**
@@ -29,19 +29,50 @@ export interface Resolved {
   paidBy: 'reader' | 'house';
 }
 
-/**
- * Every transport worth trying, in order: the reader's own key first, then each
- * configured house key. A list rather than a single answer, because one
- * provider declining does not mean nobody can answer.
- */
-async function candidates(userId: string | null): Promise<Resolved[]> {
-  const out: Resolved[] = [];
+export interface AskPreference {
+  /** The reader's explicit choice, if they made one. */
+  providerId?: string | null;
+  model?: string | null;
+}
 
+/**
+ * Every transport worth trying, in order.
+ *
+ * A reader who names a provider gets that one first — their key, their model,
+ * their bill. The automatic chain still follows behind it, so a bad choice (a
+ * model that 404s, a key that is out of credit) degrades to a working answer
+ * rather than to nothing.
+ */
+async function candidates(userId: string | null, pref?: AskPreference): Promise<Resolved[]> {
+  const out: Resolved[] = [];
+  const wanted = pref?.providerId?.trim() || null;
+  const wantedModel = pref?.model?.trim() || null;
+
+  if (wanted) {
+    const readerKey = userId ? await resolveKey(userId, wanted).catch(() => null) : null;
+    const houseKey = readerKey ? null : houseKeyFor(wanted);
+    const key = readerKey ?? houseKey;
+    const provider = getProvider(wanted);
+    if (key && provider) {
+      let model = wantedModel ?? provider.fallbackModel;
+      if (!wantedModel) {
+        const live = await listModels(wanted, key, { freeOnly: !readerKey }).catch(() => []);
+        model = chooseChatModel(live, wanted) ?? model;
+      }
+      out.push({ providerId: wanted, model, key, paidBy: readerKey ? 'reader' : 'house' });
+    }
+  }
+
+  /* The reader's own keys, whatever provider they are on.
+     This used to look at Anthropic only, on the assumption that a free plan
+     needs Claude. It meant a reader who brought a perfectly good Groq or
+     OpenRouter key watched the site quietly spend the owner's quota instead. */
   if (userId) {
-    const key = await resolveKey(userId, 'anthropic').catch(() => null);
-    if (key) {
-      const model = (await chosenModel(userId, 'anthropic').catch(() => null)) ?? 'claude-sonnet-4-5';
-      out.push({ providerId: 'anthropic', model, key, paidBy: 'reader' });
+    for (const provider of PROVIDERS) {
+      const key = await resolveKey(userId, provider.id).catch(() => null);
+      if (!key) continue;
+      const model = (await chosenModel(userId, provider.id).catch(() => null)) ?? provider.fallbackModel;
+      out.push({ providerId: provider.id, model, key, paidBy: 'reader' });
     }
   }
 
@@ -65,7 +96,18 @@ async function candidates(userId: string | null): Promise<Resolved[]> {
     out.push({ providerId: candidate, model, key, paidBy: 'house' });
   }
 
-  return out;
+  /* One entry per (provider, key, model). Deduplicating on provider and key alone
+     was wrong: if the reader names a provider and a model that turns out to be
+     withdrawn, the healthy fallback for that same key was dropped as a
+     duplicate, and the answer died with it. A reader who guesses a model name
+     wrong should still get an answer. */
+  const seen = new Set<string>();
+  return out.filter((c) => {
+    const k = `${c.providerId}|${c.key}|${c.model}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 export interface ModelAnswer {
@@ -86,12 +128,13 @@ export async function answerFromAnyModel(
   userId: string | null,
   passages: string[],
   question: string,
+  pref?: AskPreference,
 ): Promise<ModelAnswer | null> {
   if (passages.length === 0) return null;
 
   let options: Resolved[];
   try {
-    options = await candidates(userId);
+    options = await candidates(userId, pref);
   } catch (err) {
     console.error('[strata] model resolve failed:', err);
     return null;
@@ -159,6 +202,10 @@ export async function modelsFor(
   // catalogue for a reader's own key, which is their money.
   const freeOnly = usingHouse;
   const models = await listModels(providerId, key, { freeOnly });
-  if (models.length > 0) return models;
+  /* Never offer a model that cannot chat. Groq's free tier ships whisper and two
+     prompt guards alongside the language models, and a picker that lists them is
+     a picker that fails on the first suggestion. */
+  const usable = orderByPreference(chatOnly(models), providerId);
+  if (usable.length > 0) return usable;
   return [{ id: provider.fallbackModel, label: provider.fallbackModel, free: true }];
 }

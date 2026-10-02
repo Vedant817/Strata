@@ -19,6 +19,9 @@ import { isSaved, memoryKeyFor } from '../../lib/repo/reader';
 import { getMyHighlights, getPostHighlights } from '../../lib/repo/highlights';
 import { myReadingLists } from '../../lib/repo/taxonomy';
 import { askPost } from '../../lib/repo/ask';
+import { PROVIDERS } from '../../lib/ai/providers';
+import { houseKeyFor } from '../../lib/ai/catalog';
+import { resolveKey } from '../../lib/repo/providerKeys';
 import { blockToPlainText } from '../../lib/blocks';
 import { resolvePrefs, DEPTH_COOKIE, ensureAnonId, type Depth } from '../../lib/prefs';
 import { minutesAtDepth } from '../../lib/blocks';
@@ -173,9 +176,26 @@ const errorNoteId = Astro.url.searchParams.get('note');
  *  asked-and-answered question is as shareable as the post itself. */
 const askQuery = (Astro.url.searchParams.get('ask') ?? '').trim().slice(0, 500);
 const askAsked = askQuery.length >= 3;
+const askProviderParam = Astro.url.searchParams.get('askProvider') ?? '';
+const askModelParam = Astro.url.searchParams.get('askModel') ?? '';
+const askProvider = PROVIDERS.some((p) => p.id === askProviderParam) ? askProviderParam : '';
+const askModel = askModelParam.slice(0, 120);
 const askResult = askAsked
-  ? await askPost(post.id, view.current.id, askQuery, identity.userId)
+  ? await askPost(post.id, view.current.id, askQuery, identity.userId, 3, {
+      providerId: askProvider || null,
+      model: askModel || null,
+    })
   : null;
+
+/** Providers this reader could actually use: their own keys, plus the owner's. */
+/** Providers this reader could actually use: their own keys, plus the owner's. */
+const readerHasKey = new Set<string>();
+if (identity.userId) {
+  for (const p of PROVIDERS) {
+    if (await resolveKey(identity.userId, p.id).catch(() => null)) readerHasKey.add(p.id);
+  }
+}
+const askProviders = PROVIDERS.filter((p) => readerHasKey.has(p.id) || Boolean(houseKeyFor(p.id)));
 
 const title = isViewingOld ? `${post.title} (revision ${view.current.versionNumber})` : post.title;
 const description = post.seoDescription || stripInline(post.dek);
@@ -247,7 +267,61 @@ const jsonLd = [
         </p>
       </div>
     </header>
-    <script is:inline define:vars={{ postId: post.id }}>
+    <script is:inline>
+  (() => {
+    /* Fill the model box from the live catalogue when a provider is chosen.
+       A text input with a datalist rather than a <select>: catalogues churn
+       daily, and a stale hardcoded list is how Ask ended up calling a model that
+       had been withdrawn. Whatever is typed is sent as-is, so an unlisted model
+       still works.
+
+       Deferred to DOMContentLoaded on purpose. This script is emitted in the
+       article header while the picker it drives is rendered further down the
+       page, so at parse time `getElementById` returns null and the whole thing
+       silently does nothing — which looks exactly like a broken endpoint. */
+    const start = () => {
+      const root = document.querySelector('[data-ask-prefs]');
+      const provider = document.getElementById('ask-provider');
+      const model = document.getElementById('ask-model');
+      const options = document.querySelector('[data-model-options]');
+      if (!root || !provider || !model || !options) return;
+
+      let token = 0;
+      async function load() {
+        const id = provider.value;
+        options.innerHTML = '';
+        if (!id) return;
+        const mine = ++token;
+        try {
+          const res = await fetch(`/api/models?provider=${encodeURIComponent(id)}`, {
+            headers: { accept: 'application/json' },
+          });
+          if (!res.ok) return;
+          const body = await res.json();
+          if (mine !== token) return;
+          for (const m of body.models ?? []) {
+            const opt = document.createElement('option');
+            opt.value = m.id;
+            opt.label = m.free ? `${m.label} (free)` : m.label;
+            options.appendChild(opt);
+          }
+        } catch {
+          /* Offline, or the catalogue is down: automatic still works. */
+        }
+      }
+      provider.addEventListener('change', load);
+      if (provider.value) load();
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', start, { once: true });
+    } else {
+      start();
+    }
+  })();
+</script>
+
+<script is:inline define:vars={{ postId: post.id }}>
       (() => {
         /* Presence heartbeat: anonymous, silent, ambient. Beats while the page
            is visible; the count next to the byline updates from the same
@@ -562,7 +636,7 @@ const jsonLd = [
             summarizes those same quotes, and the quotes stay the source of
             truth.
           </p>
-          <form method="get" action="#ask" class="mt-4 flex max-w-xl gap-2" role="search">
+          <form id="ask-form" method="get" action="#ask" class="mt-4 flex max-w-xl gap-2" role="search">
             <label class="sr-only" for="ask-q">
               Ask this article
             </label>
@@ -585,6 +659,64 @@ const jsonLd = [
               Ask
             </button>
           </form>
+
+          {/* Pick a transport and a model. This is a preference, not a
+              requirement: leave it on automatic and the site picks the cheapest
+              working model, which is what almost everyone should do. It exists
+              because a reader who paid for their own key should be able to spend
+              it here, and because "which model answered this" is a question the
+              reader is entitled to ask before they read the answer. */}
+          {
+            askProviders.length > 0 && (
+              <details class="mt-3 max-w-xl" data-ask-prefs>
+                <summary class="meta cursor-pointer text-ink-3 hover:text-ink">
+                  Answer with a specific model
+                </summary>
+                <div class="mt-2 flex flex-wrap items-end gap-2">
+                  <div class="min-w-0 flex-1">
+                    <label class="meta block" for="ask-provider">
+                      Provider
+                    </label>
+                    <select
+                      id="ask-provider"
+                      name="askProvider"
+                      form="ask-form"
+                      class="mt-1 w-full border border-rule bg-paper px-3 py-2 text-[0.9375rem] focus:border-accent focus:outline-none"
+                    >
+                      <option value="">Automatic (cheapest working model)</option>
+                      {askProviders.map((p) => (
+                        <option value={p.id} selected={p.id === askProvider}>
+                          {p.label}
+                          {readerHasKey.has(p.id) ? ' — your key' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div class="min-w-0 flex-1" data-model-slot>
+                    <label class="meta block" for="ask-model">
+                      Model
+                    </label>
+                    <input
+                      id="ask-model"
+                      name="askModel"
+                      form="ask-form"
+                      list="ask-model-options"
+                      value={askModel}
+                      maxlength="120"
+                      placeholder="Automatic"
+                      autocomplete="off"
+                      class="mt-1 w-full border border-rule bg-paper px-3 py-2 text-[0.9375rem] focus:border-accent focus:outline-none"
+                    />
+                    <datalist id="ask-model-options" data-model-options />
+                  </div>
+                </div>
+                <p class="mt-1.5 text-[0.75rem] leading-snug text-ink-3">
+                  Your key is used for your provider if you added one, otherwise the
+                  site's. Automatic is free-tier only.
+                </p>
+              </details>
+            )
+          }
 
           {askAsked && (
             <div class="mt-5 max-w-xl border border-rule bg-surface p-4">

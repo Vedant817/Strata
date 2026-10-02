@@ -88,6 +88,7 @@ export async function askPost(
   question: string,
   askedById: string | null,
   limit = 3,
+  pref?: { providerId?: string | null; model?: string | null },
 ): Promise<AskResult> {
   const started = Date.now();
   const clean = question.trim().slice(0, 500);
@@ -131,6 +132,7 @@ export async function askPost(
         askedById,
         passages.map((p) => p.quote),
         clean,
+        pref,
       );
     } catch (err) {
       console.error('[strata] ask model path failed, falling back:', err);

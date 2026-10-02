@@ -67,6 +67,40 @@ const PREFERRED_CHAT: Record<string, string[]> = {
 };
 
 /**
+ * Drop everything that cannot hold a conversation.
+ *
+ * Shared by the picker and the resolver on purpose. The picker used to offer the
+ * raw catalogue, which put `whisper-large-v3` at the top of Groq's list — a
+ * speech-to-text model. Anyone who took the first suggestion got a failed Ask
+ * and no explanation. A free-tier catalogue is a list of endpoints, not of
+ * assistants, and it has to be filtered before a human sees it.
+ */
+export function chatOnly(models: CatalogModel[]): CatalogModel[] {
+  return models.filter((m) => !NOT_CHAT.test(m.id));
+}
+
+/**
+ * Order a catalogue so the models we would rather use appear first.
+ *
+ * The provider lists whatever it feels like, so a reader picking from it gets
+ * `apodex-1.1-mini` or an Arabic-only Orpheus as their first suggestion. Those
+ * will answer, but nobody chose them on purpose. Promotion order comes from
+ * PREFERRED_CHAT; everything else keeps its catalogue order underneath.
+ */
+export function orderByPreference(models: CatalogModel[], providerId: string): CatalogModel[] {
+  const preferred = PREFERRED_CHAT[providerId] ?? [];
+  const rank = new Map(preferred.map((id, i) => [id, i]));
+  return [...models].sort((a, b) => {
+    const ra = rank.get(a.id);
+    const rb = rank.get(b.id);
+    if (ra !== undefined && rb !== undefined) return ra - rb;
+    if (ra !== undefined) return -1;
+    if (rb !== undefined) return 1;
+    return 0;
+  });
+}
+
+/**
  * Pick a model to actually call from a live catalogue.
  *
  * Preference order first, then anything that merely looks like a chat model.
@@ -74,13 +108,13 @@ const PREFERRED_CHAT: Record<string, string[]> = {
  * fall back to extractive quotes instead of burning a request on a 404.
  */
 export function chooseChatModel(models: CatalogModel[], providerId: string): string | null {
-  const live = new Set(models.filter((m) => m.free).map((m) => m.id));
+  const free = chatOnly(models).filter((m) => m.free);
+  const live = new Set(free.map((m) => m.id));
   if (live.size === 0) return null;
   for (const id of PREFERRED_CHAT[providerId] ?? []) {
     if (live.has(id)) return id;
   }
-  const plausible = models.find((m) => m.free && !NOT_CHAT.test(m.id));
-  return plausible?.id ?? null;
+  return free[0]?.id ?? null;
 }
 
 function env(name: string): string | undefined {
