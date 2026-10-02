@@ -8,6 +8,7 @@ import {
   makeAnchor,
   resolveAnchor,
 } from '../../lib/repo/annotations';
+import { notifyMentions } from '../../lib/repo/notifications';
 import { ANNOTATION_KINDS, type AnnotationKind } from '../../lib/db/schema';
 import { stripInline } from '../../lib/inline';
 
@@ -132,6 +133,19 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     authorId: identity.userId,
     guestName: guestName || null,
     isPrivate: payload.isPrivate === true,
+  });
+
+  /* Mentions only after the note exists, so the notification can point at it.
+     Deliberately not awaited into the response path's failure modes: a reader
+     writing a note must never lose the note because a mention could not be
+     delivered, and a duplicate mention is deduped by a unique index anyway. */
+  await notifyMentions({
+    body,
+    postId,
+    annotationId: created.id,
+    fromUserId: identity.userId,
+    fromAnonKey: identity.anonId,
+    fromName: guestName || 'someone',
   });
 
   return new Response(

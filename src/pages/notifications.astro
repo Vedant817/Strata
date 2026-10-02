@@ -1,0 +1,115 @@
+---
+import Base from '../layouts/Base.astro';
+import { getIdentity } from '../lib/repo/auth';
+import { ANON_COOKIE } from '../lib/prefs';
+import { listInbox, markAllRead, listMutes, setMuted } from '../lib/repo/notifications';
+import { NOTIFICATION_KINDS, type NotificationKind } from '../lib/db/schema';
+
+const identity = await getIdentity(Astro.cookies);
+const anonKey = Astro.cookies.get(ANON_COOKIE)?.value ?? identity.anonId ?? '';
+
+const KIND_LABEL: Record<NotificationKind, string> = {
+  mention: 'Mentioned in a note',
+  reply: 'Reply to your note',
+  'correction-accepted': 'Correction accepted',
+  amendment: 'Your note became an amendment',
+};
+
+/**
+ * Opening the inbox is the read receipt. Marking it here rather than on click
+ * keeps it correct when someone triages from a reader app's link preview,
+ * where no click ever reaches us.
+ */
+await markAllRead(anonKey, identity.userId);
+
+const entries = await listInbox(anonKey, identity.userId);
+const muted = await listMutes(identity.userId);
+
+function when(ms: number) {
+  return new Date(ms).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
+---
+
+<Base title="Your inbox" description="Replies, mentions and accepted corrections.">
+  <section class="shell max-w-2xl py-12">
+    <p class="meta">Reading loop</p>
+    <h1 class="mt-3 text-3xl">Your inbox</h1>
+    <p class="mt-3 max-w-prose text-[0.9375rem] leading-relaxed text-ink-2">
+      Replies to your notes, and mentions of your handle. Nothing is sent by
+      email — that would mean tracking you, which is the thing this site does
+      not do.
+    </p>
+
+    {
+      entries.length === 0 ? (
+        <p class="mt-10 border border-rule p-6 text-[0.9375rem] text-ink-3">
+          Nothing yet. Notes left on{' '}
+          <a href="/writing" class="underline decoration-rule underline-offset-4 hover:decoration-accent">
+            anything you have read
+          </a>{' '}
+          are the ones that get replies.
+        </p>
+      ) : (
+        <ul class="mt-10 divide-y divide-rule border-y border-rule">
+          {entries.map((n) => (
+            <li class="py-4">
+              <a href={n.href} class="group block">
+                <p class="text-[0.75rem] uppercase tracking-widest text-ink-3">
+                  {KIND_LABEL[n.kind]}
+                  <span class="ml-2 normal-case tracking-normal">{when(n.createdAt)}</span>
+                </p>
+                <p class="mt-1 text-[0.9375rem] group-hover:text-accent">{n.subject}</p>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+
+    <section class="mt-14">
+      <h2 class="text-xl">What you hear about</h2>
+      <p class="mt-2 max-w-prose text-[0.9375rem] leading-relaxed text-ink-2">
+        Silence is set per kind, not per person. You cannot be cut off from
+        corrections about your own writing, and nobody can be silenced out of
+        the argument.
+      </p>
+      {
+        !identity.userId ? (
+          <p class="mt-4 border-l-2 border-rule-strong pl-3 text-[0.9375rem] text-ink-3">
+            Claim a handle to change these. Mutes need somewhere durable to live
+            — a browser that forgets its cookie would forget the setting too,
+            and a setting that evaporates teaches you it does not work.
+          </p>
+        ) : (
+          <ul class="mt-4 divide-y divide-rule border-y border-rule">
+            {NOTIFICATION_KINDS.map((kind) => (
+              <li class="flex flex-wrap items-center justify-between gap-3 py-3">
+                <span class="text-[0.9375rem]">{KIND_LABEL[kind]}</span>
+                <form method="post" action="/api/notifications">
+                  <input type="hidden" name="kind" value={kind} />
+                  <input type="hidden" name="muted" value={muted.includes(kind) ? '0' : '1'} />
+                  <input type="hidden" name="returnTo" value="/notifications" />
+                  <button
+                    type="submit"
+                    aria-pressed={muted.includes(kind)}
+                    class:list={[
+                      'border px-3 py-1.5 text-[0.875rem]',
+                      muted.includes(kind)
+                        ? 'border-rule-strong text-ink-3'
+                        : 'border-ink bg-ink text-paper hover:border-accent hover:bg-accent',
+                    ]}
+                  >
+                    {muted.includes(kind) ? 'Muted' : 'Hearing'}
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+  </section>
+</Base>

@@ -661,6 +661,83 @@ export const savedPosts = sqliteTable(
 );
 
 /* -------------------------------------------------------------------------- */
+/* Notifications                                                          */
+/* -------------------------------------------------------------------------- */
+
+export const NOTIFICATION_KINDS = [
+  'mention',
+  'reply',
+  'correction-accepted',
+  'amendment',
+] as const;
+
+export const notifications = sqliteTable(
+  'notifications',
+  {
+    id: text('id').primaryKey(),
+    /**
+     * Anonymous-first, same shape as a note. The overwhelmingly common case
+     * here is a reader who has never claimed a handle being replied to or
+     * @-mentioned, so `anon_key` is the primary address and `user_id` is only
+     * populated once someone claims. Addressing by user_id alone would mean
+     * almost nobody in the product's main loop is ever reachable.
+     */
+    userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    anonKey: text('anon_key'),
+    kind: text('kind', { enum: NOTIFICATION_KINDS }).notNull(),
+    /**
+     * The sentence the recipient reads before deciding to click. Deliberately
+     * not re-derived at render time: "replied to your note" stays true even
+     * after the note is deleted, and the recipient still deserves to know it
+     * happened.
+     */
+    subject: text('subject').notNull(),
+    /**
+     * The post's id, not its slug. Slugs are assigned at publish and can change,
+     * so a stored slug turns every old notification into a 404 the moment a
+     * writer retitles a piece. The slug is joined in at read time instead.
+     */
+    postId: text('post_id').references(() => posts.id, { onDelete: 'cascade' }),
+    annotationId: text('annotation_id'),
+    readAt: integer('read_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [
+    index('notifications_inbox_idx').on(t.anonKey, t.createdAt),
+    index('notifications_unread_idx').on(t.anonKey, t.readAt),
+    /**
+     * One notification per (note, recipient, kind). Retrying a failed request
+     * or double-submitting a reply form must not turn into two identical
+     * lines in someone's inbox. Rows with a NULL annotation_id (mentions that
+     * could not be attributed) do not collide, because SQLite treats NULLs as
+     * distinct in a unique index.
+     */
+    uniqueIndex('notifications_dedupe_idx').on(t.annotationId, t.anonKey, t.kind),
+  ],
+);
+
+/**
+ * Per-kind silence.
+ *
+ * Not "mute this person". Strata's loop depends on someone disagreeing with a
+ * writer in public, so the thing a reader wants to turn off is a *category of
+ * noise* — being @-mentioned in every passing thought — not the humans who
+ * actually correct them. Muting per-kind also means nobody can be silenced out
+ * of corrections about their own work, which is the one notification that must
+ * always arrive.
+ */
+export const notificationMutes = sqliteTable(
+  'notification_mutes',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: NOTIFICATION_KINDS }).notNull(),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.kind] })],
+);
+
 /* Types                                                                       */
 /* -------------------------------------------------------------------------- */
 
@@ -673,3 +750,5 @@ export type Ask = typeof asks.$inferSelect;
 export type ReadingList = typeof readingLists.$inferSelect;
 export type ReadingListItem = typeof readingListItems.$inferSelect;
 export type PostStatus = Post['status'];
+export type Notification = typeof notifications.$inferSelect;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];

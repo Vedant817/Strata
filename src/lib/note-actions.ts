@@ -15,6 +15,7 @@ import {
   toggleReaction,
   voterKeyFor,
 } from './repo/annotations';
+import { notify, notifyMentions } from './repo/notifications';
 import { ANON_COOKIE } from './prefs';
 
 /**
@@ -127,7 +128,28 @@ export async function applyNoteAction(
         anonId,
         authorId: identity.userId,
       });
-      return result.ok ? { ok: true } : { ok: false, message: result.error };
+      if (!result.ok) return { ok: false, message: result.error };
+      // The parent note's author is the one person who cares about this.
+      const parent = await getAnnotation(input.parentId);
+      if (parent) {
+        await notify({
+          kind: 'reply',
+          userId: parent.authorId,
+          anonKey: parent.anonId,
+          subject: 'Someone replied to your note',
+          postId: parent.postId,
+          annotationId: result.id,
+        });
+        await notifyMentions({
+          body: input.body,
+          postId: parent.postId,
+          annotationId: result.id,
+          fromUserId: identity.userId,
+          fromAnonKey: anonId,
+          fromName: identity.userId ? (identity.handle ?? 'someone') : 'someone',
+        });
+      }
+      return { ok: true };
     }
 
     case 'edit': {
@@ -149,7 +171,20 @@ export async function applyNoteAction(
         return { ok: false, message: 'You cannot accept your own note.' };
       }
       const ok = await acceptAnnotation(input.noteId);
-      return ok ? { ok: true } : { ok: false, message: 'That note is gone.' };
+      if (!ok) return { ok: false, message: 'That note is gone.' };
+      // The whole point of accepting a correction is that the person who wrote
+      // it finds out. Silence here would make the feature feel broken.
+      if (note?.anonId || note?.authorId) {
+        await notify({
+          kind: 'correction-accepted',
+          userId: note.authorId,
+          anonKey: note.anonId,
+          subject: 'Your correction was accepted',
+          postId: note.postId,
+          annotationId: input.noteId,
+        });
+      }
+      return { ok: true };
     }
 
     case 'report': {

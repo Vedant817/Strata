@@ -81,6 +81,19 @@ const navLinks = links.filter((l) => l.href !== '/search');
       </nav>
 
       <div class="ml-auto flex shrink-0 items-center gap-1 border-l border-rule pl-3">
+        {/* No unread badge here on purpose. This header renders on every page,
+            and a badge means a COUNT query on every page load to serve a number
+            that is almost always zero. The count lives on /reader and
+            /notifications, where the reader has already decided to look. */}
+        <a
+          href="/notifications"
+          class:list={[
+            'meta py-1.5 no-underline transition-colors hover:text-ink',
+            isActive('/notifications') ? 'text-ink' : 'text-ink-3',
+          ]}
+        >
+          Inbox
+        </a>
         <button
           type="button"
           data-theme-toggle
