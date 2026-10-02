@@ -114,15 +114,42 @@ function blockText(b: (typeof doc.blocks)[number]): string {
           class="mt-1.5 w-full border border-rule bg-paper px-3 py-2 text-[0.9375rem] focus:border-accent focus:outline-none"
         />
 
-        <ol class="mt-8 space-y-6">
+        <ol class="mt-8 space-y-6" data-block-list data-count={doc.blocks.length}>
           {doc.blocks.map((b, i) => (
-            <li class="border border-rule p-4">
+            <li
+              data-block
+              data-id={b.id}
+              data-position={i}
+              draggable="true"
+              class="block border border-rule bg-paper p-4"
+            >
               <input type="hidden" name={`b_${i}_id`} value={b.id} />
               <div class="flex flex-wrap items-center gap-2">
-                <span class="meta">
+                {/* Drag affordance and its keyboard equivalent. The arrows are the
+                    accessible path and work without JavaScript ever running. */}
+                <span class="meta cursor-grab select-none" aria-hidden="true" title="Drag to reorder">⠿</span>
+                <span class="meta" data-block-pos data-type={b.type}>
                   {i + 1} · {b.type}
                 </span>
                 <span class="ml-auto flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-move="up"
+                    disabled={i === 0}
+                    aria-label={`Move block ${i + 1} up`}
+                    class="border border-rule px-2 py-1 text-[0.8125rem] disabled:opacity-40 hover:border-accent"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    data-move="down"
+                    disabled={i === doc.blocks.length - 1}
+                    aria-label={`Move block ${i + 1} down`}
+                    class="border border-rule px-2 py-1 text-[0.8125rem] disabled:opacity-40 hover:border-accent"
+                  >
+                    ↓
+                  </button>
                   <label class="meta" for={`b_${i}_order`}>
                     Order
                   </label>
@@ -403,4 +430,127 @@ function blockText(b: (typeof doc.blocks)[number]): string {
       </section>
     </div>
   </div>
+
+  <script>
+    /**
+     * Drag ordering, as a convenience layer over the order inputs that already
+     * exist and already persist.
+     *
+     * Two deliberate choices:
+     *
+     * - **The number inputs stay.** They are the accessible, no-JavaScript path
+     *   and the actual persistence mechanism. Drag is sugar on top, never the
+     *   only way to reorder. That also means this block can be entirely absent
+     *   and the editor still works.
+     *
+     * - **Renumbering is the whole job.** Every field is named `b_<index>_*`,
+     *   so moving a node without rewriting its fields would submit a document
+     *   whose order inputs and content no longer belong to the same block. Any
+     *   reorder here renames every `b_<n>_*` name, id and label pairing to match
+     *   the new position.
+     */
+    const list = document.querySelector<HTMLUListElement>('[data-block-list]');
+    if (list) {
+      const FIELD = /\bb_(\d+)_(id|order|layer|text|textarea|title|quote|kind|remove)\b/;
+
+      const fields = (li: HTMLElement) =>
+        Array.from(li.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select'));
+
+      /** Rewrite every index-keyed field name/id under `li` to position `to`. */
+      function renumber(li: HTMLElement, to: number) {
+        for (const el of fields(li)) {
+          if (el.name) el.name = el.name.replace(FIELD, `b_${to}_$2`);
+          if (el.id) el.id = el.id.replace(FIELD, `b_${to}_$2`);
+        }
+        // `for=` on the row's own labels has to follow, or clicking "Order" would
+        // focus whichever block used to own that id.
+        for (const label of li.querySelectorAll<HTMLLabelElement>('label[for]')) {
+          label.htmlFor = label.htmlFor.replace(FIELD, `b_${to}_$2`);
+        }
+      }
+
+      /** Re-state order inputs and the visible position counter after any move. */
+      function resync() {
+        const rows = Array.from(list!.children) as HTMLElement[];
+        rows.forEach((li, i) => {
+          renumber(li, i);
+          const order = li.querySelector<HTMLInputElement>('input[name$="_order"]');
+          if (order) order.value = String(i);
+          const pos = li.querySelector<HTMLSpanElement>('[data-block-pos]');
+          if (pos) {
+            const type = pos.dataset.type ?? '';
+            pos.textContent = `${i + 1} · ${type}`;
+          }
+          const up = li.querySelector<HTMLButtonElement>('[data-move="up"]');
+          const down = li.querySelector<HTMLButtonElement>('[data-move="down"]');
+          if (up) up.disabled = i === 0;
+          if (down) down.disabled = i === rows.length - 1;
+          li.setAttribute('data-position', String(i));
+        });
+        list!.dataset.count = String(rows.length);
+      }
+
+      function move(li: HTMLElement, delta: number) {
+        const rows = Array.from(list!.children) as HTMLElement[];
+        const from = rows.indexOf(li);
+        const to = from + delta;
+        if (from < 0 || to < 0 || to >= rows.length) return;
+        if (delta < 0) list!.insertBefore(li, rows[to]);
+        else list!.insertBefore(li, rows[to].nextSibling);
+        resync();
+        // Keep the keyboard where the block went, rather than jumping to the top
+        // of the document and losing the writer's place.
+        li.querySelector<HTMLButtonElement>('[data-move]')?.focus();
+      }
+
+      let dragging: HTMLElement | null = null;
+
+      list.addEventListener('dragstart', (e) => {
+        const li = (e.target as HTMLElement).closest<HTMLElement>('li[data-block]');
+        if (!li) return;
+        dragging = li;
+        li.dataset.dragging = 'true';
+        e.dataTransfer?.setData('text/plain', li.dataset.id ?? '');
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+      });
+
+      list.addEventListener('dragover', (e) => {
+        if (!dragging) return;
+        e.preventDefault();
+        const over = (e.target as HTMLElement).closest<HTMLElement>('li[data-block]');
+        if (!over || over === dragging) return;
+        const rect = over.getBoundingClientRect();
+        const after = e.clientY > rect.top + rect.height / 2;
+        list.insertBefore(dragging, after ? over.nextSibling : over);
+      });
+
+      const drop = (e: Event) => {
+        e.preventDefault();
+        dragging?.removeAttribute('data-dragging');
+        dragging = null;
+        resync();
+      };
+      list.addEventListener('drop', drop);
+      list.addEventListener('dragend', drop);
+
+      list.addEventListener('click', (e) => {
+        const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-move]');
+        if (!btn) return;
+        e.preventDefault();
+        move(btn.closest<HTMLElement>('li[data-block]')!, btn.dataset.move === 'up' ? -1 : 1);
+      });
+
+      // Ctrl/Cmd + arrow moves a block without a mouse. Arrow keys alone are
+      // left alone so they keep navigating the form normally.
+      list.addEventListener('keydown', (e) => {
+        if (!(e.metaKey || e.ctrlKey) || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+        const li = (e.target as HTMLElement).closest<HTMLElement>('li[data-block]');
+        if (!li) return;
+        e.preventDefault();
+        move(li, e.key === 'ArrowUp' ? -1 : 1);
+      });
+
+      resync();
+    }
+  </script>
 </Base>
