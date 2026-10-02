@@ -1,0 +1,130 @@
+---
+import Base from '../../layouts/Base.astro';
+import { getIdentity } from '../../lib/repo/auth';
+import { buildAllFormats } from '../../lib/synthesis-formats';
+
+/**
+ * The canon, synthesised four ways.
+ *
+ * Writer-only because two of the four are private working documents — the
+ * reading path is an editorial judgement and the gaps list is a map of what you
+ * have not written yet. Neither is something to publish by accident.
+ *
+ * Every format is deterministic. That is the point: a synthesis a writer can
+ * cite, and a reader can compare against last quarter's, has to be reproducible.
+ */
+
+const identity = await getIdentity(Astro.cookies);
+
+/*
+ * Studio-only, enforced here rather than by hiding links: the reading path is an
+ * editorial judgement and the gaps list is a map of what has not been written
+ * yet. Neither should be reachable by typing the URL.
+ *
+ * A 403 with an explanation rather than a redirect. `return Astro.redirect()`
+ * from frontmatter did not short-circuit in this Astro version, and silently
+ * rendering the page with a 200 is the failure mode worth avoiding outright.
+ */
+const isOwner = Boolean(identity.userId);
+if (!isOwner) Astro.response.status = 403;
+
+const formats = isOwner ? await buildAllFormats(identity.userId as string) : [];
+const copy = new URL(Astro.url).searchParams.get('copied');
+---
+
+<Base title="Synthesis" description="The canon, synthesised." noindex>
+  {
+    !isOwner && (
+      <section class="shell max-w-2xl py-12">
+        <p class="meta">Writer Studio</p>
+        <h1 class="mt-3 text-3xl">Synthesis</h1>
+        <p class="mt-3 text-[0.9375rem] leading-relaxed text-ink-2">
+          This is a writer's view of their own canon. It is not public, because
+          a reading path is an editorial judgement and an unanswered-questions
+          list is a map of what has not been written yet.
+        </p>
+        <p class="mt-4 text-[0.9375rem]">
+          <a href="/write#handle" class="underline decoration-rule underline-offset-4 hover:decoration-accent">
+            Claim a handle to open it →
+          </a>
+        </p>
+      </section>
+    )
+  }
+  <section class="shell max-w-3xl py-12">
+    <p class="meta"><a href="/studio" class="no-underline hover:text-ink">Studio</a> · Synthesis</p>
+    <h1 class="mt-3 text-3xl">Synthesis</h1>
+    <p class="mt-3 max-w-prose text-[0.9375rem] leading-relaxed text-ink-2">
+      Four views of everything published. No model runs here — each format is
+      derived from data the site already holds, so the same canon always produces
+      the same document. For prose, use Ask on an individual post.
+    </p>
+
+    {
+      copy && (
+        <p class="mt-4 border-l-2 border-accent pl-3 text-[0.9375rem]" role="status">
+          Copied.
+        </p>
+      )
+    }
+
+    <div class="mt-10 space-y-12">
+      {
+        formats.map((f) => (
+          <section aria-labelledby={`fmt-${f.id}`}>
+            <h2 id={`fmt-${f.id}`} class="text-xl">
+              {f.label}
+            </h2>
+            <p class="mt-1 text-[0.9375rem] text-ink-3">{f.blurb}</p>
+
+            {f.caveats.length > 0 && (
+              <ul class="mt-3 border-l-2 border-rule-strong pl-3">
+                {f.caveats.map((c) => (
+                  <li class="text-[0.875rem] leading-relaxed text-ink-2">{c}</li>
+                ))}
+              </ul>
+            )}
+
+            <div class="mt-3 border border-rule bg-paper">
+              <pre class="max-h-96 overflow-auto whitespace-pre-wrap p-4 font-mono text-[0.8125rem] leading-relaxed">{f.text}</pre>
+            </div>
+
+            {/* Progressive enhancement: a plain textarea keeps copy available if
+                scripting is off, so the control is added by the script below
+                rather than shipped inert. */}
+            <div data-copy-slot={f.id} class="mt-2" />
+          </section>
+        ))
+      }
+    </div>
+  </section>
+</Base>
+
+<script>
+  for (const slot of document.querySelectorAll<HTMLElement>('[data-copy-slot]')) {
+    const pre = slot.previousElementSibling?.querySelector('pre');
+    if (!pre) continue;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className =
+      'border border-rule px-3 py-1.5 text-[0.875rem] transition-colors hover:border-accent hover:text-accent';
+    button.textContent = 'Copy';
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(pre.textContent ?? '');
+        button.textContent = 'Copied';
+        setTimeout(() => (button.textContent = 'Copy'), 1600);
+      } catch {
+        // Clipboard access is refused in plenty of ordinary situations. Select
+        // the text instead of failing silently.
+        const range = document.createRange();
+        range.selectNodeContents(pre);
+        const sel = getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        button.textContent = 'Selected — press Ctrl+C';
+      }
+    });
+    slot.append(button);
+  }
+</script>
