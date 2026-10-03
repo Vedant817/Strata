@@ -61,6 +61,9 @@ jobs:
       - name: Draft autopsy
         run: npm run test:autopsy
 
+      - name: Audience simulator
+        run: npm run test:audience
+
       # WebAuthn parsing. This decoder reads attacker-supplied attestation bytes,
       # so its caps and its refusal paths are the security properties, and they
       # need proving on every build rather than when a keypress goes wrong.

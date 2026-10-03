@@ -6,6 +6,8 @@ import { getIdentity } from '../../../lib/repo/auth';
 import { myPostHealth } from '../../../lib/repo/studio';
 import { getEmpathyReport, COHORT_FLOOR } from '../../../lib/repo/empathy';
 import { getAutopsy } from '../../../lib/repo/autopsy';
+import { getPostById } from '../../../lib/repo/posts';
+import { simulateAudience } from '../../../lib/audience';
 import { plural } from '../../../lib/format';
 
 /**
@@ -35,6 +37,9 @@ if (mine && !report) return new Response(null, { status: 404, statusText: 'Not f
 /* Autopsy is text-first. Two of its three findings do not need a cohort, so
    it runs even when the curve is withheld. */
 const autopsyReport = mine ? await getAutopsy(mine.id) : null;
+const audience = mine
+  ? simulateAudience((await getPostById(mine.id))?.blocks ?? [])
+  : null;
 ---
 
 <Base
@@ -97,6 +102,39 @@ const autopsyReport = mine ? await getAutopsy(mine.id) : null;
                     {f.quote && (
                       <blockquote class="mt-2 text-[0.875rem] leading-relaxed text-ink-2">
                         {f.quote}
+                      </blockquote>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )
+      }
+
+      {
+        mine && audience && (
+          <section aria-labelledby="audience-heading">
+            <h2 id="audience-heading" class="text-xl">Where an 8-year-old drops off</h2>
+            <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+              Three deterministic personas, no model. A grade is Flesch–Kincaid
+              on that paragraph; an outsider is stopped by the same undefined
+              term Draft Autopsy names. Re-run after a cut — the answer will
+              not drift.
+            </p>
+            {audience.personas.length === 0 ? (
+              <p class="mt-4 border-l-2 border-rule-strong pl-3 text-[0.9375rem] text-ink-2">
+                Nothing to simulate. This post has no paragraphs yet.
+              </p>
+            ) : (
+              <ul class="mt-4 space-y-3">
+                {audience.personas.map((p) => (
+                  <li class="border-l-2 border-rule-strong pl-3">
+                    <p class="meta">{p.label}</p>
+                    <p class="mt-1 text-[0.9375rem] leading-relaxed text-ink">{p.detail}</p>
+                    {p.quote && p.dropBlockId && (
+                      <blockquote class="mt-2 text-[0.875rem] leading-relaxed text-ink-2">
+                        {p.quote}
                       </blockquote>
                     )}
                   </li>
