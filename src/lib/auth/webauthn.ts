@@ -247,7 +247,15 @@ export async function loginVerify(input: {
     .where(eq(passkeys.credentialId, input.credential.rawId))
     .limit(1);
   const key = rows[0];
-  if (!key) return { ok: false, error: 'That passkey is not registered here.' };
+  /* One message for every refusal from here on. An endpoint that says "not
+     registered" for an unknown credential id and "signature did not verify" for
+     a known one is a membership oracle: it answers, for any credential id a
+     reader supplies, whether that device is registered here. The route's own
+     comment promises not to do that, so the reasons are logged and not returned.
+     Credential ids are 32 random bytes, so this is defence in depth rather than
+     an open door — but the promise is cheap to keep. */
+  const REFUSED = 'That passkey was refused.';
+  if (!key) return { ok: false, error: REFUSED };
 
   let coseKey: Map<number | string, Cbor>;
   try {
@@ -276,18 +284,18 @@ export async function loginVerify(input: {
     signed,
     fromBase64Url(input.credential.response.signature),
   );
-  if (!ok) return { ok: false, error: 'That signature did not verify.' };
+  if (!ok) return { ok: false, error: REFUSED };
 
   // rpIdHash and the UP flag are inside the signed bytes, so checking them here
   // is checking the authenticator's statement, not ours.
   const rpIdHash = toHex(authData.subarray(0, 32));
   const expectedRp = await sha256(new TextEncoder().encode(relyingPartyId(input.url)));
   if (rpIdHash !== toHex(expectedRp)) {
-    return { ok: false, error: 'That passkey belongs to a different site.' };
+    return { ok: false, error: REFUSED };
   }
-  if (authData.length < 33) return { ok: false, error: 'Truncated authenticator data.' };
+  if (authData.length < 33) return { ok: false, error: REFUSED };
   if ((authData[32]! & 0x01) === 0) {
-    return { ok: false, error: 'The authenticator did not confirm user presence.' };
+    return { ok: false, error: REFUSED };
   }
 
   /* Counter regression means a cloned authenticator. Authenticators that do not
@@ -297,7 +305,7 @@ export async function loginVerify(input: {
     ((authData[33]! << 24) | (authData[34]! << 16) | (authData[35]! << 8) | authData[36]!) >>> 0;
   if (key.counter !== 0 && signCount !== 0 && signCount <= key.counter) {
     console.warn('[strata] passkey counter regression — possible cloned credential');
-    return { ok: false, error: 'That passkey was refused for a possible security reason.' };
+    return { ok: false, error: REFUSED };
   }
 
   await database

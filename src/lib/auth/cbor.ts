@@ -134,13 +134,46 @@ export function decodeCbor(bytes: Uint8Array): Cbor {
 /* Attestation object                                                          */
 /* -------------------------------------------------------------------------- */
 
-/** The public keys an authenticator can actually be expected to produce. */
-const SUPPORTED_ALGS: Record<number, { name: EcKeyFormat; hash: 'SHA-256' | 'SHA-384' | 'SHA-512' }> = {
-  [-7]: { name: 'ECDSA', hash: 'SHA-256' }, // ES256, the overwhelming majority
-  [-257]: { name: 'ECDSA', hash: 'SHA-256' }, // RS256, still common on Windows
-  [-35]: { name: 'ECDSA', hash: 'SHA-384' }, // ES384
-  [-36]: { name: 'ECDSA', hash: 'SHA-512' }, // ES512
-  [-65535]: { name: 'ECDSA', hash: 'SHA-256' }, // EdDSA over edwards25519
+/**
+ * COSE key types (RFC 8152 §13). The key type, not the algorithm, decides how
+ * the key material is laid out — and the algorithm alone does not say enough to
+ * import anything.
+ */
+const KTY_OKP = 1;
+const KTY_EC2 = 2;
+const KTY_RSA = 3;
+
+/** COSE elliptic curves (§13.1), with the fixed coordinate width of each. */
+const EC_CURVES: Record<number, { namedCurve: 'P-256' | 'P-384' | 'P-521'; bytes: number }> = {
+  1: { namedCurve: 'P-256', bytes: 32 },
+  2: { namedCurve: 'P-384', bytes: 48 },
+  3: { namedCurve: 'P-521', bytes: 66 },
+};
+
+/** The only OKP curve WebAuthn defines: Ed25519 (§13.2). */
+const CRV_ED25519 = 6;
+
+type Hash = 'SHA-256' | 'SHA-384' | 'SHA-512';
+
+/**
+ * The public keys an authenticator can actually be expected to produce.
+ *
+ * `kty` is carried explicitly because a COSE key is self-describing only if you
+ * read the right label: for an EC2 key `-1` is the *curve*, with the coordinates
+ * in `-2`/`-3`, while for an RSA key `-1` is the modulus. Reading `-1` as key
+ * material regardless of type imports a one-byte "key", the import fails, and
+ * every assertion from an ES256 authenticator — which is nearly all of them —
+ * is refused as "signature did not verify". The hash is named too, because
+ * WebCrypto's default for ECDSA is SHA-256 whatever the curve.
+ */
+const SUPPORTED_ALGS: Record<number, { kty: number; hash: Hash }> = {
+  [-7]: { kty: KTY_EC2, hash: 'SHA-256' }, // ES256, the overwhelming majority
+  [-35]: { kty: KTY_EC2, hash: 'SHA-384' }, // ES384
+  [-36]: { kty: KTY_EC2, hash: 'SHA-512' }, // ES512
+  [-257]: { kty: KTY_RSA, hash: 'SHA-256' }, // RS256, still common on Windows Hello
+  [-258]: { kty: KTY_RSA, hash: 'SHA-384' }, // RS384
+  [-259]: { kty: KTY_RSA, hash: 'SHA-512' }, // RS512
+  [-65535]: { kty: KTY_OKP, hash: 'SHA-512' }, // EdDSA over edwards25519
 };
 
 /**
@@ -249,7 +282,59 @@ export function parseAttestationObject(bytes: Uint8Array): ParsedAttestation {
   };
 }
 
-/** Assert `data` was signed by `coseKey` over `signature`. */
+/**
+ * ECDSA signatures are specified as raw `r || s` (IEEE P1363), which is the only
+ * form WebCrypto will verify. Chromium's own virtual authenticator — a shipping
+ * browser, not a third-party tool — emits the ASN.1 DER wrapper instead, so a
+ * reader signing in through it would be permanently locked out of an account
+ * they had just enrolled.
+ *
+ * It is not a different signature: the same (r, s) over the same message, checked
+ * against the same key. Unwrapping is therefore a compatibility measure and not a
+ * relaxation. Anything that does not parse cleanly is returned untouched, so a
+ * malformed signature is still refused by verification rather than by a parser.
+ */
+function derToRaw(signature: Uint8Array, size: number): Uint8Array | null {
+  if (signature.length < 8 || signature[0] !== 0x30) return null;
+  let offset = 2;
+  let bodyLength = signature[1]!;
+  if (bodyLength & 0x80) {
+    const count = bodyLength & 0x7f;
+    if (count < 1 || count > 2 || signature.length < 2 + count + 2) return null;
+    bodyLength = 0;
+    for (let i = 0; i < count; i++) bodyLength = bodyLength * 256 + signature[2 + i]!;
+    offset = 2 + count;
+  }
+  if (2 + bodyLength !== signature.length) return null;
+
+  const readInt = (): Uint8Array | null => {
+    if (signature[offset] !== 0x02) return null;
+    const len = signature[offset + 1]!;
+    // Only the short form is accepted; a definite long form here would be
+    // something no authenticator emits and is not worth the parsing.
+    if (len & 0x80 || len < 1) return null;
+    const start = offset + 2;
+    if (start + len > signature.length) return null;
+    let bytes = signature.subarray(start, start + len);
+    offset = start + len;
+    // A leading 0x00 is the sign byte of a positive INTEGER.
+    if (bytes[0] === 0x00) bytes = bytes.subarray(1);
+    if (bytes.length === 0 || bytes.length > size) return null;
+    return bytes;
+  };
+
+  const r = readInt();
+  if (!r) return null;
+  const s = readInt();
+  if (!s || offset !== signature.length) return null;
+
+  const raw = new Uint8Array(size * 2);
+  raw.set(r, size - r.length);
+  raw.set(s, size * 2 - s.length);
+  return raw;
+}
+
+/** Assert `data` was signed by the private key behind `coseKey`. */
 export async function verifySignature(
   coseKey: Map<number | string, Cbor>,
   alg: number,
@@ -258,21 +343,93 @@ export async function verifySignature(
 ): Promise<boolean> {
   const spec = SUPPORTED_ALGS[alg];
   if (!spec) return false;
+  // The key must agree with the algorithm it is checked against, or a caller
+  // could ask for RSA-PKCS1 verification of an EC2 key and get a nonsense
+  // answer rather than a refusal.
+  if (coseKey.get(1) !== spec.kty) return false;
 
-  const keyBytes = coseKey.get(-1);
-  if (!(keyBytes instanceof Uint8Array)) return false;
+  const bytes = (label: number): Uint8Array | null => {
+    const v = coseKey.get(label);
+    return v instanceof Uint8Array ? v : null;
+  };
 
-  const key = await crypto.subtle.importKey(
-    'raw',
-    toArrayBuffer(keyBytes),
-    { name: spec.name, namedCurve: alg === -35 ? 'P-384' : 'P-256' },
-    false,
-    ['verify'],
-  ).catch(() => null);
-  if (!key) return false;
+  try {
+    if (spec.kty === KTY_EC2) {
+      const crv = coseKey.get(-1);
+      const x = bytes(-2);
+      const y = bytes(-3);
+      if (typeof crv !== 'number' || !x || !y) return false;
+      const curve = EC_CURVES[crv];
+      if (!curve) return false;
 
-  // WebAuthn signs the raw authenticator data, not a pre-hashed digest.
-  return crypto.subtle.verify(spec.name, key, toArrayBuffer(signature), toArrayBuffer(data));
+      // SEC1 uncompressed point: 0x04 || X || Y. Coordinates are normalised to
+      // the curve's width because an authenticator that trims a leading zero
+      // byte produces a point WebCrypto will not import.
+      const point = new Uint8Array(1 + curve.bytes * 2);
+      point[0] = 0x04;
+      point.set(x.subarray(Math.max(0, x.length - curve.bytes)), 1);
+      point.set(y.subarray(Math.max(0, y.length - curve.bytes)), 1 + curve.bytes);
+
+      const key = await crypto.subtle.importKey(
+        'raw',
+        toArrayBuffer(point),
+        { name: 'ECDSA', namedCurve: curve.namedCurve },
+        false,
+        ['verify'],
+      );
+      // Normalise a DER-wrapped signature if that is what arrived; a raw one is
+      // passed through untouched.
+      const sig = derToRaw(signature, curve.bytes) ?? signature;
+      return await crypto.subtle.verify(
+        { name: 'ECDSA', hash: spec.hash },
+        key,
+        toArrayBuffer(sig),
+        toArrayBuffer(data),
+      );
+    }
+
+    if (spec.kty === KTY_RSA) {
+      const n = bytes(-1);
+      const e = bytes(-2);
+      if (!n || !e) return false;
+      const key = await crypto.subtle.importKey(
+        'jwk',
+        {
+          kty: 'RSA',
+          n: Buffer.from(n).toString('base64url'),
+          e: Buffer.from(e).toString('base64url'),
+          alg: jwkAlgFor(spec.hash),
+          ext: true,
+        },
+        { name: 'RSASSA-PKCS1-v1_5', hash: spec.hash },
+        false,
+        ['verify'],
+      );
+      return await crypto.subtle.verify(
+        'RSASSA-PKCS1-v1_5',
+        key,
+        toArrayBuffer(signature),
+        toArrayBuffer(data),
+      );
+    }
+
+    if (spec.kty === KTY_OKP) {
+      const crv = coseKey.get(-1);
+      const x = bytes(-2);
+      if (crv !== CRV_ED25519 || !x) return false;
+      const key = await crypto.subtle.importKey('raw', toArrayBuffer(x), 'Ed25519', false, ['verify']);
+      return await crypto.subtle.verify({ name: 'Ed25519' }, key, toArrayBuffer(signature), toArrayBuffer(data));
+    }
+
+    return false;
+  } catch {
+    // A malformed key is a refusal, not a crash: the bytes came from a device.
+    return false;
+  }
+}
+
+function jwkAlgFor(hash: Hash): string {
+  return hash === 'SHA-256' ? 'RS256' : hash === 'SHA-384' ? 'RS384' : 'RS512';
 }
 
 export function toHex(bytes: Uint8Array): string {

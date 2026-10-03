@@ -73,6 +73,9 @@ Stateless container, Turso holds all data — no volume needed:
 | `npm run verify` | Design lint, typecheck and anchor tests |
 | `npm run test:anchors` | Anchor resolution cases (exact / moved / lost) |
 | `npm run test:anchor-survival` | End-to-end proof that a note survives a rewrite |
+| `npm run test:annotations` | Marginalia invariants, publication scope, and a rehearsal of migration 0020 |
+| `npm run test:migration` | The 0020 rehearsal alone: a pre-0020 schema, six planted reactions, the real migration |
+| `npm run test:sandbox` | Sandbox invariants for runnable code blocks (see `docs/threat-model-sandbox.md`) |
 | `npm run test:smoke` | 32 routes against the built server |
 | `npm run perf:budget` | Fails if external client JS exceeds 40 KB (currently 0) |
 | `npm run db:seed` / `db:reset` | Wipe and rebuild the database |
@@ -80,6 +83,23 @@ Stateless container, Turso holds all data — no volume needed:
 
 `npm run test:smoke` builds nothing and assumes `npm run build` has run; point
 it at an already-running server with `BASE_URL=http://localhost:4321`.
+
+### Checks that need a browser
+
+Two checks cannot run in CI, because CI has no browser and both features are
+only meaningful against a real engine. Start a browser with
+`msedge --remote-debugging-port=9222 --user-data-dir=%TEMP%/strata-cdp`, run
+`npm run dev`, then:
+
+| Command | What it proves |
+| --- | --- |
+| `npm run test:sandbox:browser` | The snippet sandbox in a real browser: opaque origin, no network egress — judged from the browser's own network log, because a refused fetch and a CORS failure look identical from inside the page — and a busy loop killed without wedging the tab |
+| `npm run test:passkeys:browser` | The whole WebAuthn ceremony against Chromium's virtual authenticator: enrolment through the real button, sign-in, a signature counter above 2^31, replay, clone detection, and that refusals do not distinguish an unknown credential from a forged one |
+
+`test:passkeys:browser` needs a hostname rather than an IP address: WebAuthn
+refuses an IP as a relying-party ID, so passkeys cannot work on
+`http://127.0.0.1:4321` at all. It writes to `data/strata.db` and cleans up after
+itself.
 
 ## Continuous integration
 
