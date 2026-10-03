@@ -36,6 +36,7 @@ const OK = [
   '/og/cache-invalidation-is-a-distributed-problem.png',
   '/og/cache-invalidation-is-a-distributed-problem-diff.png',
   '/rss.xml',
+  '/digest.xml',
   '/robots.txt',
   '/w/cache-invalidation-is-a-distributed-problem',
   '/w/the-p99-is-a-lie-you-tell-yourself',

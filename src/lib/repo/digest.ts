@@ -9,6 +9,8 @@ export interface DigestItem {
   authorName: string;
   kind: 'new' | 'revised';
   detail: string;
+  /** When the post was published or the revision landed. Used by the RSS feed. */
+  at: number;
 }
 
 export interface Digest {
@@ -58,6 +60,7 @@ export async function buildDigest(sinceMs: number): Promise<Digest> {
       authorName: p.authorName,
       kind: 'new',
       detail: `New from ${p.authorName}.`,
+      at: p.publishedAt ?? Date.now(),
     });
   }
 
@@ -95,6 +98,7 @@ export async function buildDigest(sinceMs: number): Promise<Digest> {
       authorName: r.authorName,
       kind: 'revised',
       detail: `Revised to v${r.versionNumber} — ${r.changeSummary}`,
+      at: r.createdAt,
     });
   }
 
