@@ -55,6 +55,12 @@ jobs:
       - name: Artifact prop coercion
         run: npx tsx scripts/check-artifact-props.ts
 
+      # Draft Autopsy is three named sentences. The assertions are the cases
+      # that must fire and the cases that must not, so a later tweak to the
+      # jargon heuristic cannot quietly start nagging every code span.
+      - name: Draft autopsy
+        run: npm run test:autopsy
+
       # WebAuthn parsing. This decoder reads attacker-supplied attestation bytes,
       # so its caps and its refusal paths are the security properties, and they
       # need proving on every build rather than when a keypress goes wrong.

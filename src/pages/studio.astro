@@ -8,6 +8,8 @@ import { getListShareToken, myReadingLists } from '../lib/repo/taxonomy';
 import { getCollaborators } from '../lib/repo/collaborators';
 import { getPostById, suggestLinks } from '../lib/repo/posts';
 import { lintCitations, type LintReport } from '../lib/lint';
+import { getAutopsy } from '../lib/repo/autopsy';
+import type { AutopsyReport } from '../lib/autopsy';
 import { driftScore, featuresOfBlocks, readVoice, type VoiceProfile } from '../lib/repo/voice';
 import { getReportedNotes } from '../lib/repo/annotations';
 import { buildDigest, getDigestSubscribers } from '../lib/repo/digest';
@@ -36,10 +38,15 @@ const health = identity.userId ? await myPostHealth(identity.userId) : [];
 /* Citation lint over each post's current body. Advisory by construction: a
    number with no source is a question, not a verdict, and the page says so. */
 const lintByPost = new Map<string, LintReport>();
+const autopsyByPost = new Map<string, AutopsyReport>();
 if (identity.userId) {
   for (const post of health) {
     const full = await getPostById(post.id);
     if (full) lintByPost.set(post.id, lintCitations(full.blocks));
+  }
+  for (const post of health.slice(0, 10)) {
+    const report = await getAutopsy(post.id);
+    if (report && report.findings.length > 0) autopsyByPost.set(post.id, report);
   }
 }
 
@@ -426,6 +433,17 @@ const SOURCES = ['scratchpad', 'clip', 'share', 'voice', 'screenshot'] as const;
                         class="meta no-underline text-ink-3 hover:text-ink"
                       >
                         where readers get to →
+                      </a>
+                    </p>
+                  )}
+                  {autopsyByPost.get(post.id) && (
+                    <p class="mt-2 text-[0.875rem] leading-relaxed text-ink-2">
+                      {autopsyByPost.get(post.id)!.findings[0]!.detail}{' '}
+                      <a
+                        href={`/studio/readers/${post.slug}`}
+                        class="text-ink no-underline hover:text-accent"
+                      >
+                        autopsy →
                       </a>
                     </p>
                   )}

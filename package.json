@@ -25,7 +25,8 @@
     "test:sandbox": "tsx scripts/check-sandbox-invariants.ts",
     "test:sandbox:browser": "node scripts/check-sandbox-in-browser.mjs",
     "test:passkeys:browser": "node scripts/check-passkey-roundtrip.mjs",
-    "test:migration": "tsx scripts/check-migration-0020.ts"
+    "test:migration": "tsx scripts/check-migration-0020.ts",
+    "test:autopsy": "tsx scripts/check-autopsy.ts"
   },
   "dependencies": {
     "@astrojs/check": "^0.5.10",

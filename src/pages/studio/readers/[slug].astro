@@ -5,6 +5,7 @@ import { resolvePrefs, ANON_COOKIE } from '../../../lib/prefs';
 import { getIdentity } from '../../../lib/repo/auth';
 import { myPostHealth } from '../../../lib/repo/studio';
 import { getEmpathyReport, COHORT_FLOOR } from '../../../lib/repo/empathy';
+import { getAutopsy } from '../../../lib/repo/autopsy';
 import { plural } from '../../../lib/format';
 
 /**
@@ -31,6 +32,9 @@ const mine = owned.find((p) => p.slug === slug);
 // The cohort floor means even a correct answer is withheld below it.
 const report = mine ? await getEmpathyReport(mine.id) : null;
 if (mine && !report) return new Response(null, { status: 404, statusText: 'Not found' });
+/* Autopsy is text-first. Two of its three findings do not need a cohort, so
+   it runs even when the curve is withheld. */
+const autopsyReport = mine ? await getAutopsy(mine.id) : null;
 ---
 
 <Base
@@ -66,6 +70,42 @@ if (mine && !report) return new Response(null, { status: 404, statusText: 'Not f
           <a href="/studio" class="text-ink no-underline hover:text-accent">Studio →</a>
         </p>
       )}
+
+      {
+        mine && autopsyReport && (
+          <section aria-labelledby="autopsy-heading">
+            <h2 id="autopsy-heading" class="text-xl">Draft autopsy</h2>
+            <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+              Three named checks: a term used without a definition, a conclusion
+              that restates the introduction, and a section that is both long
+              and skipped. Advisory — a finding is a sentence to act on, not a
+              score.
+            </p>
+            {autopsyReport.findings.length === 0 ? (
+              <p class="mt-4 border-l-2 border-rule-strong pl-3 text-[0.9375rem] text-ink-2">
+                Nothing to report.{' '}
+                {autopsyReport.jargonChecked === 1 ? '1 term' : `${autopsyReport.jargonChecked} terms`}{' '}
+                checked ·{' '}
+                {autopsyReport.sectionsChecked === 1 ? '1 section' : `${autopsyReport.sectionsChecked} sections`}{' '}
+                measured.
+              </p>
+            ) : (
+              <ul class="mt-4 space-y-3">
+                {autopsyReport.findings.map((f) => (
+                  <li class="border-l-2 border-accent pl-3">
+                    <p class="text-[0.9375rem] leading-relaxed text-ink">{f.detail}</p>
+                    {f.quote && (
+                      <blockquote class="mt-2 text-[0.875rem] leading-relaxed text-ink-2">
+                        {f.quote}
+                      </blockquote>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )
+      }
 
       {
         mine && report!.suppressed && (
