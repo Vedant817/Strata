@@ -28,3 +28,21 @@ export async function countPasskeys(userId: string): Promise<number> {
   const rows = await listPasskeys(userId);
   return rows.length;
 }
+
+/**
+ * Has anyone on this site enrolled a passkey at all?
+ *
+ * Exists for one caller: /settings offers passkey sign-in only when the answer
+ * is yes, because a passkey cannot exist before a handle has been claimed and
+ * the ceremony fails with "no matching credential" for a reader who has none.
+ *
+ * Deliberately a boolean and not a count. A number would be a readership metric
+ * published to every anonymous visitor, and nothing here needs the difference
+ * between one device and fifty. It stops at the first row, so it is a cheap
+ * existence probe rather than a full scan.
+ */
+export async function anyPasskeysEnrolled(): Promise<boolean> {
+  const database = await readyDb();
+  const row = await database.select({ one: passkeys.id }).from(passkeys).limit(1);
+  return row.length > 0;
+}

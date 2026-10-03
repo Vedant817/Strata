@@ -294,6 +294,31 @@ try {
     ok('a signature counter was parsed out of authenticatorData', Number.isInteger(Number(key.counter)), `counter=${String(key.counter)}`);
   }
 
+  /* The enrolment handler reloads the page 900ms after it succeeds, so the next
+     ceremony has to wait for that navigation to land. Interrupting it aborts the
+     pending get() with NotAllowedError — a failure of this script's timing, not
+     of the product. */
+  await sleep(2000);
+
+  /* The other half of the feature: a reader with no cookie has to be able to
+     *find* the sign-in control. It is rendered only when a passkey exists on the
+     site, which is true right now — this run enrolled one — so this asserts the
+     positive case. The negative (no passkey anywhere, no button) is asserted
+     after cleanup, where the row is gone. */
+  {
+    await send('Network.clearBrowserCookies');
+    await send('Page.navigate', { url: `${BASE}/settings` });
+    await sleep(2500);
+    const signedOut = await evaluate(`(() => ({
+      signIn: !!document.querySelector('[data-passkey-signin]'),
+      button: !!document.querySelector('[data-passkey-signin-button]'),
+      next: document.querySelector('[data-passkey-signin]')?.getAttribute('data-next') ?? null,
+    }))()`);
+    ok('a signed-out reader is offered passkey sign-in once one exists', signedOut.signIn);
+    ok('with a button to press', signedOut.button);
+    eq('and a same-origin destination', signedOut.next, '/settings');
+  }
+
   const creds = await send('WebAuthn.getCredentials', { authenticatorId });
   eq('the authenticator holds exactly one credential', creds.credentials.length, 1);
   const credId = creds.credentials[0]?.credentialId;
@@ -582,9 +607,24 @@ try {
   }
   await send('Network.clearBrowserCookies').catch(() => {});
   await send('WebAuthn.removeVirtualAuthenticator', { authenticatorId }).catch(() => {});
-  ws.close();
-  await db.close();
 }
+
+/* The negative case, which the run above cannot see: with no passkey left in
+   the database, the sign-in control must not be rendered at all — otherwise every
+   reader without one is offered a button whose ceremony can only fail. Runs after
+   cleanup, so it sees the site as a first-time visitor would. */
+try {
+  await send('Network.clearBrowserCookies');
+  await send('Page.navigate', { url: `${BASE}/settings` });
+  await sleep(2500);
+  const gone = await evaluate(`!!document.querySelector('[data-passkey-signin]')`);
+  ok('and it disappears once no passkey is enrolled', gone === false);
+} catch (err) {
+  ok('and it disappears once no passkey is enrolled', false, String(err.message).split('\n')[0]);
+}
+
+ws.close();
+await db.close();
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);

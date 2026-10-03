@@ -78,6 +78,7 @@ Stateless container, Turso holds all data — no volume needed:
 | `npm run test:annotations` | Marginalia invariants, publication scope, and a rehearsal of migration 0020 |
 | `npm run test:migration` | The 0020 rehearsal alone: a pre-0020 schema, six planted reactions, the real migration |
 | `npm run test:sandbox` | Sandbox invariants for runnable code blocks (see `docs/threat-model-sandbox.md`) |
+| `npx tsx scripts/check-artifact-props.ts` | Artifact prop coercion, and the matrix/timeline rows that a save used to drop |
 | `npm run test:smoke` | 32 routes against the built server |
 | `npm run perf:budget` | Fails if external client JS exceeds 40 KB (currently 0) |
 | `npm run db:seed` / `db:reset` | Wipe and rebuild the database |

@@ -1,0 +1,283 @@
+---
+/**
+ * The author-side artifact builder (PLAN.md §4.4, v3).
+ *
+ * Replaces the raw JSON textarea. That box was three bugs in a trench coat:
+ *
+ *   1. It told a writer nothing about which keys the figure they had just picked
+ *      actually reads, so the only way to learn the shape was to read the source.
+ *   2. The coercion applied on save dropped `cases` and `events` — arrays of
+ *      objects that `Artifact.astro` genuinely reads — so saving a post with a
+ *      matrix or timeline figure emptied it. Fixed in `lib/artifact-props.ts`;
+ *      this form is what makes the shape visible in the first place.
+ *   3. A writer who broke the JSON got an empty figure and no explanation.
+ *
+ * The form is generated from `ARTIFACT_FIELDS`, the same table the server
+ * coerces with, so the two cannot describe different shapes. The preview is
+ * rendered by the *server*, from the same component the article renders with —
+ * this builder never draws a figure, it asks for one. That is what keeps the
+ * reading path free of a chart runtime while still letting a writer see what
+ * they are making before they publish it.
+ */
+import {
+  ARTIFACT_FIELDS,
+  formToProps,
+  rowsOf,
+  type ArtifactKind,
+  type FieldSpec,
+} from '../lib/artifact-props';
+
+interface Props {
+  /** Form prefix, so several blocks on one page keep separate values. */
+  name: string;
+  kind: ArtifactKind;
+  props: Record<string, unknown>;
+}
+
+const { name, kind, props } = Astro.props as Props;
+
+const spec = ARTIFACT_FIELDS[kind] ?? ARTIFACT_FIELDS.curve;
+const rows = rowsOf(kind, props);
+
+/* A cell is described rather than built. Astro's frontmatter is TypeScript, not
+   JSX, so returning an element from a helper here is a parse error — the dev
+   server reports it as a failed import rather than as a template problem. */
+interface Cell {
+  tag: 'input' | 'textarea';
+  /** Only the two types this builder uses; a wider union would not typecheck against
+   *  Astro's own attribute type, and widening it is not the point. */
+  type?: 'number' | 'text';
+  step?: string;
+  rows?: number;
+  spellcheck?: boolean;
+  maxlength: number;
+  placeholder: string;
+  class: string;
+}
+
+const BASE_CLASS =
+  'mt-1 block w-full border border-rule bg-paper px-3 py-2 text-[0.875rem] focus:border-accent focus:outline-none';
+
+function cellFor(field: FieldSpec): Cell {
+  const base = {
+    maxlength: field.kind === 'text' || field.kind === 'textList' ? 2000 : 200,
+    placeholder: field.placeholder ?? '',
+    class: BASE_CLASS,
+  };
+  if (field.kind === 'number') return { ...base, tag: 'input', type: 'number', step: 'any' };
+  if (field.kind === 'numberList' || field.kind === 'textList') {
+    return {
+      ...base,
+      tag: 'textarea',
+      rows: 3,
+      spellcheck: false,
+      class: `${base.class} resize-y font-mono text-[0.8125rem]`,
+    };
+  }
+  return { ...base, tag: 'input', type: 'text', spellcheck: false };
+}
+
+const valueOf = (field: FieldSpec) => {
+  const v = props[field.key];
+  return Array.isArray(v) ? v.join(', ') : v === undefined || v === null ? '' : String(v);
+};
+
+/** What the writer is storing right now, for the read-only panel. */
+const stored = JSON.stringify(formToProps(kind, {}), null, 2);
+const rowFields = spec.rows?.fields ?? [];
+---
+
+<div class="mt-3 border border-rule bg-surface p-3" data-artifact-builder data-kind={kind}>
+  <input type="hidden" name={`${name}_component`} value={kind} />
+
+  <div class="grid gap-3 sm:grid-cols-2">
+    {
+      spec.fields.map((field) => {
+        const cell = cellFor(field);
+        return (
+          <label class="meta">
+            {field.label}
+            {cell.tag === 'input' ? (
+              <input
+                name={`${name}__f_${field.key}`}
+                data-artifact-field={field.key}
+                type={cell.type ?? 'text'}
+                step={cell.step}
+                maxlength={cell.maxlength}
+                placeholder={cell.placeholder}
+                spellcheck={cell.spellcheck ? 'false' : undefined}
+                value={valueOf(field)}
+                class={cell.class}
+              />
+            ) : (
+              <textarea
+                name={`${name}__f_${field.key}`}
+                data-artifact-field={field.key}
+                rows={cell.rows ?? 3}
+                maxlength={cell.maxlength}
+                placeholder={cell.placeholder}
+                spellcheck={cell.spellcheck ? 'false' : undefined}
+                class={cell.class}
+              >
+                {valueOf(field)}
+              </textarea>
+            )}
+            {field.help && (
+              <span class="mt-1 block text-[0.75rem] leading-snug text-ink-3">{field.help}</span>
+            )}
+          </label>
+        );
+      })
+    }
+  </div>
+
+  {
+    spec.rows && (
+      <div class="mt-4">
+        <div class="flex items-baseline justify-between gap-3">
+          <p class="meta">{spec.rows.key}</p>
+          <button
+            type="button"
+            class="meta border border-rule px-2 py-1 hover:border-accent"
+            data-artifact-add-row={spec.rows.key}
+          >
+            {`Add a ${spec.rows.key.replace(/s$/, '')}`}
+          </button>
+        </div>
+        <p class="meta mt-1 text-[0.75rem] leading-snug text-ink-3">
+          {`Each line is one ${spec.rows.key.replace(
+            /s$/,
+            '',
+          )}. A row with nothing in it is dropped when the draft saves, so a half-written one costs nothing.`}
+        </p>
+
+        <input
+          type="hidden"
+          name={`${name}__f_${spec.rows.key}__count`}
+          value={rows.length}
+          data-artifact-count
+        />
+
+        <div class="mt-2 space-y-2" data-artifact-rows>
+          {rows.map((row, i) => (
+            <div class="grid gap-2 border-l-2 border-rule-strong pl-3 sm:grid-cols-2" data-artifact-row>
+              {rowFields.map((field) => {
+                const cell = cellFor(field);
+                const key = `${name}__f_${spec.rows!.key}.${i}.${field.key}`;
+                const value = row[field.key] ?? '';
+                return (
+                  <label class="meta">
+                    {field.label}
+                    {cell.tag === 'input' ? (
+                      <input
+                        name={key}
+                        data-artifact-field={field.key}
+                        type={cell.type ?? 'text'}
+                        step={cell.step}
+                        maxlength={cell.maxlength}
+                        placeholder={cell.placeholder}
+                        spellcheck={cell.spellcheck ? 'false' : undefined}
+                        value={value}
+                        class={cell.class}
+                      />
+                    ) : (
+                      <textarea
+                        name={key}
+                        data-artifact-field={field.key}
+                        rows={cell.rows ?? 3}
+                        maxlength={cell.maxlength}
+                        placeholder={cell.placeholder}
+                        spellcheck={cell.spellcheck ? 'false' : undefined}
+                        class={cell.class}
+                      >
+                        {value}
+                      </textarea>
+                    )}
+                  </label>
+                );
+              })}
+              <button
+                type="button"
+                class="meta justify-self-start border border-rule px-2 py-1 hover:border-danger"
+                data-artifact-remove-row
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {/* Kept in the DOM rather than built from a string, so the blank row's
+            field names come from the same markup the server rendered and cannot
+            drift from the rows above it. `__INDEX__` is the slot the client
+            fills with the new row's position. */}
+        <template data-artifact-blank>
+          <div class="grid gap-2 border-l-2 border-rule-strong pl-3 sm:grid-cols-2" data-artifact-row>
+            {rowFields.map((field) => {
+              const cell = cellFor(field);
+              const key = `__INDEX__${field.key}`;
+              return (
+                <label class="meta">
+                  {field.label}
+                  {cell.tag === 'input' ? (
+                    <input
+                      name={key}
+                      data-artifact-field={field.key}
+                      type={cell.type ?? 'text'}
+                      step={cell.step}
+                      maxlength={cell.maxlength}
+                      placeholder={cell.placeholder}
+                      spellcheck={cell.spellcheck ? 'false' : undefined}
+                      class={cell.class}
+                    />
+                  ) : (
+                    <textarea
+                      name={key}
+                      data-artifact-field={field.key}
+                      rows={cell.rows ?? 3}
+                      maxlength={cell.maxlength}
+                      placeholder={cell.placeholder}
+                      spellcheck={cell.spellcheck ? 'false' : undefined}
+                      class={cell.class}
+                    />
+                  )}
+                </label>
+              );
+            })}
+            <button
+              type="button"
+              class="meta justify-self-start border border-rule px-2 py-1 hover:border-danger"
+              data-artifact-remove-row
+            >
+              Remove
+            </button>
+          </div>
+        </template>
+      </div>
+    )
+  }
+
+  {/* What the writer is storing, and what the figure will be drawn from. Not
+      editable: it is the record of what the fields above mean, and an editable
+      copy of it is precisely the trap this replaces. */}
+  <div class="mt-4 border-t border-rule pt-3">
+    <p class="meta">Preview</p>
+    <div data-artifact-preview class="mt-2" aria-live="polite">
+      <p class="meta">The figure appears here once this block has some data.</p>
+    </div>
+    <details class="mt-3">
+      <summary class="meta cursor-pointer">What this stores as JSON</summary>
+      <pre class="meta mt-2 overflow-x-auto border border-rule bg-paper p-3 text-[0.75rem] leading-relaxed">
+{stored}</pre>
+    </details>
+  </div>
+</div>
+
+<style>
+  /* Scoped to the builder, so the reading path gains nothing. The one rule that
+     matters: the preview keeps its height when empty, so the editor does not
+     jump the moment the first number arrives. */
+  [data-artifact-preview] {
+    min-height: 6rem;
+  }
+</style>

@@ -386,6 +386,56 @@ export async function getGraph(): Promise<{ nodes: GraphNode[]; edges: GraphEdge
   return { nodes, edges };
 }
 
+/**
+ * One post's own neighbourhood: what it leans on, and what leans on it.
+ *
+ * The site-wide arc diagram answers "how does this writing connect". This
+ * answers the question a reader actually arrives with, which is about one post:
+ * *why should I believe this, and what does it disagree with?* A site-wide
+ * figure is the wrong shape for that — the post you are reading is one row among
+ * thirty, and its own arcs are the only ones you care about.
+ *
+ * Both directions, because they answer different questions and a reader wants
+ * both: `leans on` is the evidence a claim rests on, and `is leaned on` is the
+ * consequence of it.
+ */
+export interface Neighbourhood {
+  node: GraphNode;
+  /** Edges from this post to the ones it cites, extends, contradicts or forks. */
+  leansOn: GraphEdge[];
+  /** The reverse: posts that cite, extend, contradict or fork this one. */
+  isLeanedOn: GraphEdge[];
+  /** Both lists together, which is what the diagram draws. */
+  edges: GraphEdge[];
+  /** Every node involved, in publication order, for laying out the diagram. */
+  nodes: GraphNode[];
+}
+
+export async function getNeighbourhood(postId: string): Promise<Neighbourhood | null> {
+  const { nodes, edges } = await getGraph();
+  const self = nodes.find((n) => n.id === postId);
+  if (!self) return null;
+
+  const mine = edges.filter((e) => e.from === postId);
+  const theirs = edges.filter((e) => e.to === postId);
+  const involved = new Set<string>([postId]);
+  for (const e of [...mine, ...theirs]) {
+    involved.add(e.from);
+    involved.add(e.to);
+  }
+
+  return {
+    node: self,
+    leansOn: mine,
+    isLeanedOn: theirs,
+    edges: [...mine, ...theirs],
+    // Publication order, which is what the diagram's axis means, and it also
+    // keeps the focal post in the middle of the timeline rather than wherever a
+    // traversal happened to put it.
+    nodes: nodes.filter((n) => involved.has(n.id)),
+  };
+}
+
 export async function getSeries() {
   const database = await readyDb();
   return database.select().from(series);

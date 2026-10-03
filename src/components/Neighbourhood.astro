@@ -1,0 +1,142 @@
+---
+/**
+ * One post's arc diagram: what it leans on, and what leans on it.
+ *
+ * The same drawing as `ArcGraph.astro`, at a different scale. The site-wide
+ * version answers "how does this writing connect"; this one answers the question
+ * a reader actually arrives with, which is about a single post — what is this
+ * resting on, and who has picked it up since.
+ *
+ * Deliberately not a force-directed graph, for the same reason the site-wide one
+ * is not: a hairball is unreadable past a dozen nodes and looks like every
+ * knowledge-graph toy. Here the node count is small enough that it barely
+ * matters, but the axis still carries meaning — publication order, so "this
+ * leans on something earlier" is legible at a glance rather than encoded in
+ * arrow direction.
+ */
+import type { GraphEdge, GraphNode } from '../lib/repo/taxonomy';
+
+interface Props {
+  /** The post in the middle. Its row is drawn heavier. */
+  focus: GraphNode;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+const { focus, nodes, edges } = Astro.props as Props;
+
+const ROW = 54;
+const LABEL_X = 0;
+const AXIS_X = 210;
+const W = 620;
+const H = nodes.length * ROW + 36;
+const ARC_W = 260;
+
+const y = (i: number) => 24 + i * ROW;
+
+/**
+ * Arcs bulge right, and the focal post's own arcs bulge furthest so they read as
+ * the subject rather than as context. Direction is not drawn: an arc's *ends* are
+ * labelled, and the legend says which way each type reads, which is more legible
+ * than an arrowhead at this size.
+ */
+const arc = (a: number, b: number, isFocus: boolean) => {
+  const from = y(a);
+  const to = y(b);
+  const span = Math.abs(to - from);
+  const reach = Math.min(ARC_W, (isFocus ? 40 : 20) + span * 0.5);
+  return `M ${AXIS_X} ${from} C ${AXIS_X + reach} ${from}, ${AXIS_X + reach} ${to}, ${AXIS_X} ${to}`;
+};
+
+const stroke: Record<GraphEdge['type'], string> = {
+  fork_of: 'var(--pine)',
+  contradicts: 'var(--danger)',
+  extends: 'var(--accent)',
+  cites: 'var(--rule-strong)',
+  mentions: 'var(--rule)',
+};
+
+const TITLES: Record<GraphEdge['type'], string> = {
+  fork_of: 'forked from',
+  contradicts: 'contradicts',
+  extends: 'extends',
+  cites: 'cites',
+  mentions: 'mentions',
+};
+
+const indexOf = new Map(nodes.map((n, i) => [n.id, i]));
+const touching = (e: GraphEdge) => e.from === focus.id || e.to === focus.id;
+---
+
+<div class="overflow-x-auto border border-rule bg-surface">
+  <svg
+    viewBox={`0 0 ${W} ${H}`}
+    class="w-full min-w-[34rem]"
+    role="img"
+    aria-label={`Where this post sits: ${edges.length} link${edges.length === 1 ? '' : 's'} among ${nodes.length} posts.`}
+  >
+    <line x1={AXIS_X} x2={AXIS_X} y1="14" y2={H - 20} stroke="var(--rule)" stroke-width="1" />
+
+    {
+      edges.map((e) => {
+        const from = indexOf.get(e.from);
+        const to = indexOf.get(e.to);
+        if (from === undefined || to === undefined) return null;
+        const isFocus = touching(e);
+        return (
+          <path
+            d={arc(from, to, isFocus)}
+            fill="none"
+            stroke={stroke[e.type]}
+            stroke-width={isFocus ? 1.5 : 1}
+            stroke-dasharray={e.type === 'mentions' ? '2 3' : undefined}
+            opacity={isFocus ? 1 : 0.55}
+          >
+            <title>{`${nodes[from]?.title} ${TITLES[e.type]} ${nodes[to]?.title}`}</title>
+          </path>
+        );
+      })
+    }
+
+    {
+      nodes.map((n, i) => (
+        <g>
+          <a href={`/w/${n.slug}`} class="no-underline">
+            <rect x={LABEL_X} y={y(i) - 18} width={AXIS_X + 10} height={ROW - 6} fill="transparent" />
+            <text
+              x={LABEL_X}
+              y={y(i) + 4}
+              font-size="12"
+              font-weight={n.id === focus.id ? 600 : 400}
+              fill={n.id === focus.id ? 'var(--ink)' : 'var(--ink-2)'}
+              font-family="var(--font-serif)"
+            >
+              {n.id === focus.id ? '▸ ' : ''}
+              {n.title.length > 30 ? `${n.title.slice(0, 29)}…` : n.title}
+            </text>
+            <line
+              x1={AXIS_X - 5}
+              x2={AXIS_X + 5}
+              y1={y(i)}
+              y2={y(i)}
+              stroke={n.id === focus.id ? 'var(--accent)' : n.versionCount > 1 ? 'var(--ink-3)' : 'var(--rule-strong)'}
+              stroke-width={n.id === focus.id ? 2.25 : 1.25}
+            />
+            <title>{`${n.title} — ${n.authorName}, ${n.versionCount} revision${n.versionCount === 1 ? '' : 's'}`}</title>
+          </a>
+        </g>
+      ))
+    }
+  </svg>
+</div>
+
+<ul class="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+  {
+    ([...new Set(edges.map((e) => e.type))] as GraphEdge['type'][]).map((t) => (
+      <li class="meta flex items-center gap-2">
+        <span class="inline-block h-px w-5" style={`background: ${stroke[t]}`} aria-hidden="true" />
+        {TITLES[t]}
+      </li>
+    ))
+  }
+</ul>

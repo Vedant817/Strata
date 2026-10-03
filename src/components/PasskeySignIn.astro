@@ -1,0 +1,152 @@
+---
+/**
+ * Passkey sign-in.
+ *
+ * The server half of this ceremony has existed since passkeys shipped and was
+ * never reachable: `navigator.credentials.get` appeared nowhere in the client,
+ * so a reader could enrol a passkey on /settings and had no way to use one.
+ * This component is that missing half, and it is deliberately a component
+ * rather than a page — a reader who hits a gated action should be one click from
+ * the second door, not routed to a login page and back.
+ *
+ * Same shape as the enrolment UI in settings.astro, deliberately: one
+ * base64url conversion, one nonce-free ceremony, one status line. Two copies of
+ * that would drift, so the conversions are duplicated only where the DOM differs
+ * — and both are exercised by scripts/check-passkey-roundtrip.mjs.
+ *
+ * Progressive enhancement throughout. With no WebAuthn the button is removed
+ * rather than left looking clickable: a control that cannot work is worse than
+ * an absence, because it costs the reader a click to discover the truth.
+ */
+interface Props {
+  /** Where to send the reader afterwards. Same-origin path only. */
+  next?: string;
+  /** Compact form for an inline gate, rather than a full section. */
+  compact?: boolean;
+}
+
+const { next = '/', compact = false } = Astro.props as Props;
+
+// A `next` that is not a path would turn this into an open redirect: the browser
+// would happily follow `https://elsewhere.example`. Same-origin paths only.
+const target = next.startsWith('/') && !next.startsWith('//') ? next : '/';
+---
+
+<div class={compact ? '' : 'border border-rule p-4'} data-passkey-signin data-next={target}>
+  <button
+    type="button"
+    data-passkey-signin-button
+    class="border border-ink bg-ink px-3 py-1.5 text-[0.875rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+  >
+    Sign in with a passkey
+  </button>
+  <span data-passkey-signin-status class="ml-3 text-[0.875rem] text-ink-3" role="status"></span>
+  <noscript>
+    <p class="meta mt-2">
+      A passkey is a key held by your device rather than your inbox, but the
+      ceremony needs JavaScript. Claim a handle to sign in by email instead.
+    </p>
+  </noscript>
+</div>
+
+<script>
+  /* First-party, inline, no framework. Same reason as every other script on the
+     site: the reading path ships no external JS. */
+
+  for (const host of document.querySelectorAll<HTMLElement>('[data-passkey-signin]')) {
+    /* In a function rather than inline in the loop: this is a module, and a
+       top-level `return` is a compile error — which is a 500 on every page that
+       includes the component, not a quiet degradation. */
+    await (async () => {
+      const button = host.querySelector<HTMLButtonElement>('[data-passkey-signin-button]');
+      const status = host.querySelector<HTMLElement>('[data-passkey-signin-status]');
+      const next = host.dataset.next || '/';
+      const say = (msg: string) => {
+        if (status) status.textContent = msg;
+      };
+
+      /* No WebAuthn, no button. `isUserVerifyingPlatformAuthenticatorAvailable`
+         is asked separately from enrolment: this one may legitimately run on a
+         desktop with a phone or a security key, where enrolment cannot. */
+      if (!window.PublicKeyCredential || !navigator.credentials) {
+        button?.remove();
+        return;
+      }
+      const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().catch(
+        () => false,
+      );
+      if (!available) {
+        button?.remove();
+        say('This device has no built-in passkey, so the button is hidden.');
+        return;
+      }
+
+      button?.addEventListener('click', async () => {
+      button.disabled = true;
+      say('Waiting for your device…');
+      try {
+        const options = await (
+          await fetch('/api/passkey', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'authenticate-options' }),
+          })
+        ).json();
+
+        /* `get` is typed as returning a bare Credential, so the concrete type is
+           asserted rather than left to inference. Same cast the enrolment path
+           makes, and the round-trip check proves both against a real
+           authenticator rather than against the type. */
+        const assertion = (await navigator.credentials.get({
+          publicKey: { ...options, challenge: base64UrlToBytes(options.challenge) },
+        })) as PublicKeyCredential | null;
+        if (!assertion) throw new Error('Cancelled.');
+
+        const response = assertion.response as AuthenticatorAssertionResponse;
+        const res = await fetch('/api/passkey', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            action: 'authenticate-verify',
+            credential: {
+              id: assertion.id,
+              rawId: bytesToBase64Url(assertion.rawId),
+              response: {
+                clientDataJSON: bytesToBase64Url(response.clientDataJSON),
+                authenticatorData: bytesToBase64Url(response.authenticatorData),
+                signature: bytesToBase64Url(response.signature),
+                userHandle: response.userHandle
+                  ? bytesToBase64Url(response.userHandle)
+                  : undefined,
+              },
+            },
+          }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? 'That did not work.');
+
+        /* A full navigation, not fetch: the session is an httpOnly cookie the
+           client cannot read, so nothing client-side can know it changed. */
+        location.assign(next);
+      } catch (err) {
+        say((err as Error).message);
+        button.disabled = false;
+      }
+      });
+    })();
+  }
+
+  function bytesToBase64Url(bytes: ArrayBuffer | Uint8Array): string {
+    const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    let s = '';
+    for (const b of view) s += String.fromCharCode(b);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function base64UrlToBytes(value: string): Uint8Array {
+    const pad = value.replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(pad + '='.repeat((4 - (pad.length % 4)) % 4));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+</script>

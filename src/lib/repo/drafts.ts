@@ -5,6 +5,12 @@ import { posts } from '../db/schema';
 import { normaliseLang } from '../highlight';
 import { nanoid } from '../ids';
 import { parseBody, serializeBody, type Block } from '../blocks';
+import {
+  fieldsFromForm,
+  formToProps,
+  parseArtifactProps,
+  type ArtifactKind,
+} from '../artifact-props';
 import { publishRevision } from './posts';
 
 /**
@@ -216,17 +222,24 @@ export async function publishDraft(
           text: (form[`b_${i}_text`] ?? '').slice(0, 20000),
         };
         break;
-      case 'interactive':
+      case 'interactive': {
+        /* Read the builder's cells, not a JSON blob the browser assembled. The
+           coercion lives on the server, once, so it cannot drift from the form
+           that produces it; the client's only job is to keep the cells' names in
+           step with their order on screen. */
+        const chosen = (form[`b_${i}_component`] ?? 'curve') as string;
+        const kind = (ARTIFACT_COMPONENTS as readonly string[]).includes(chosen)
+          ? (chosen as ArtifactKind)
+          : 'curve';
         next = {
           ...prev,
-          component: ARTIFACT_COMPONENTS.includes((form[`b_${i}_component`] ?? '') as never)
-            ? ((form[`b_${i}_component`] ?? 'curve') as (typeof ARTIFACT_COMPONENTS)[number])
-            : 'curve',
+          component: kind,
           title: (form[`b_${i}_ctitle`] ?? '').slice(0, 300),
-          props: parseArtifactPropsForTest(form[`b_${i}_props`], (form[`b_${i}_component`] ?? 'curve') as string),
+          props: formToProps(kind, fieldsFromForm(`b_${i}`, form)),
           layer,
         };
         break;
+      }
       default:
         next = { ...prev, layer };
         break;
@@ -245,65 +258,22 @@ export async function publishDraft(
 const ARTIFACT_COMPONENTS = ['curve', 'breakdown', 'matrix', 'timeline'] as const;
 
 /**
- * Artifact props are authored as JSON by the writer, so they have to be treated
- * as hostile input even though the writer is the author of the post.
+ * Artifact props are authored as JSON by the writer, so they are validated even
+ * though the writer is the author of the post.
  *
- * Two limits that are not arbitrary: an artifact is a figure inside an article,
- * not a document, so the payload is capped; and the accepted shapes are exactly
- * the ones `Artifact.astro` reads — scalars plus *flat arrays of scalars*, which
- * every component needs (`measured` is a `number[]`, `breakdown` takes paired
- * label/number lists). Anything deeper is dropped rather than stored, because a
- * consumer that expected a flat list would otherwise render `undefined` in the
- * figure.
- *
- * Dropping is only safe because it is explicit. An earlier version of this
- * function kept scalars alone, which quietly emptied the arrays in every
- * existing `curve` and `breakdown` the next time a draft was saved.
+ * The rules themselves moved to `lib/artifact-props.ts`, next to the per-component
+ * field table the authoring form is generated from, because the validator and the
+ * form have to describe the same shape — and they did not. The rule here used to
+ * accept scalars and flat arrays of scalars only, on the reasoning that nothing
+ * `Artifact.astro` reads is deeper. `matrixCases()` reads `cases` and
+ * `timelineEvents()` reads `events`, both arrays of objects, so both were dropped
+ * on save: opening a post with a matrix or timeline figure and pressing "Save
+ * draft" emptied it. The payload cap stays; the nesting rule is now "one level,
+ * values scalar", which is what the renderer actually reads.
  */
-const MAX_PROPS_BYTES = 4000;
-const MAX_ARRAY_LEN = 200;
-
-function scalar(value: unknown): string | number | boolean | null {
-  if (typeof value === 'string') return value.slice(0, 500);
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'boolean') return value;
-  return null;
-}
-
 export function parseArtifactPropsForTest(raw: string | undefined, component: string): Record<string, unknown> {
-  if (!raw || raw.length > MAX_PROPS_BYTES) return {};
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return {};
-  }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-    if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,40}$/.test(key)) continue;
-    const one = scalar(value);
-    if (one !== null) {
-      out[key] = one;
-      continue;
-    }
-    if (Array.isArray(value) && value.length <= MAX_ARRAY_LEN) {
-      const list: (string | number | boolean)[] = [];
-      for (const item of value) {
-        const s = scalar(item);
-        // One non-scalar makes the whole array unusable rather than half-right.
-        if (s === null) {
-          list.length = 0;
-          break;
-        }
-        list.push(s);
-      }
-      if (list.length) out[key] = list;
-    }
-  }
   void component;
-  return out;
+  return parseArtifactProps(raw);
 }
 
 export function blankBlock(type: 'paragraph' | 'heading' | 'quote' | 'code' | 'list' | 'callout' | 'interactive'): Block {

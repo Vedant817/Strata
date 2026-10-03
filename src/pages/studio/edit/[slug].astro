@@ -6,6 +6,8 @@ import { getPostBySlug } from '../../../lib/repo/posts';
 import { draftFromPublished, getDraft } from '../../../lib/repo/drafts';
 import { blockToPlainText } from '../../../lib/blocks';
 import { CODE_LANGUAGES, normaliseLang } from '../../../lib/highlight';
+import ArtifactBuilder from '../../../components/ArtifactBuilder.astro';
+import { ARTIFACT_KINDS } from '../../../lib/artifact-props';
 
 /**
  * The block editor, and the first loom.
@@ -47,7 +49,7 @@ const saved = Astro.url.searchParams.get('saved') === '1';
 
 const LAYERS = ['core', 'understand', 'master'] as const;
 const ADDABLE = ['paragraph', 'heading', 'quote', 'code', 'list', 'callout', 'interactive'] as const;
-const ARTIFACTS = ['curve', 'breakdown', 'matrix', 'timeline'] as const;
+const ARTIFACTS = ARTIFACT_KINDS;
 
 function blockText(b: (typeof doc.blocks)[number]): string {
   if (b.type === 'code') return b.code;
@@ -370,28 +372,12 @@ function blockText(b: (typeof doc.blocks)[number]): string {
                       />
                     </label>
                   </div>
-                  <label class="meta mt-3 block">
-                    Props (JSON)
-                    <textarea
-                      name={`b_${i}_props`}
-                      rows={5}
-                      maxlength={4000}
-                      spellcheck="false"
-                      aria-describedby={`b_${i}_props_help`}
-                      class="mt-1 block w-full resize-y border border-rule bg-paper px-3 py-2 font-mono text-[0.8125rem] leading-relaxed focus:border-accent focus:outline-none"
-                    >
-                      {JSON.stringify(b.props ?? {}, null, 2)}
-                    </textarea>
-                  </label>
-                  {/* States the contract on the field itself. An artifact that
-                      renders empty gives a writer nothing to debug, and the
-                      server silently coerces bad JSON to `{}` — so the shape
-                      has to be visible where it is being written. */}
-                  <p id={`b_${i}_props_help`} class="meta mt-1">
-                    Only strings, numbers and booleans are kept. Objects and
-                    arrays are dropped, and malformed JSON saves as an empty
-                    figure rather than failing the whole draft.
-                  </p>
+                  {/* The builder, not a JSON box. It knows which keys this
+                      component reads, coerces with the same rules a save uses,
+                      and previews through the same renderer the article uses. */}
+                  <div class="mt-3" data-artifact-slot={i}>
+                    <ArtifactBuilder name={`b_${i}`} kind={b.component} props={b.props ?? {}} />
+                  </div>
                 </>
               ) : (
                 <p class="mt-2 border-l-2 border-rule-strong pl-3 text-[0.875rem] text-ink-3">
@@ -600,6 +586,120 @@ function blockText(b: (typeof doc.blocks)[number]): string {
       });
 
       resync();
+    }
+
+/* ------------------------------------------------------------------ */
+    /* The artifact builder                                                */
+    /* ------------------------------------------------------------------ */
+
+    /* Two jobs, and the second is the one that matters.
+       1. Keep each repeating row's field names in step with its position, since
+          the saver reads `...cases.0.name` positionally and cannot know that a
+          row was removed.
+       2. Ask the server to redraw the preview.
+
+       The client never assembles the props. It posts the raw cell values and the
+       server coerces them with the same `formToProps` a save uses, so the preview
+       cannot be produced by rules publishing would not apply, and there is one
+       implementation of the coercion rather than two.
+
+       The preview arrives as markup rather than being drawn here, so the editor
+       and the article render a figure through the same component. */
+
+    for (const builder of document.querySelectorAll<HTMLElement>('[data-artifact-builder]')) {
+      const addBtn = builder.querySelector<HTMLButtonElement>('[data-artifact-add-row]');
+      const rowsWrap = builder.querySelector<HTMLElement>('[data-artifact-rows]');
+      const template = builder.querySelector<HTMLTemplateElement>('[data-artifact-blank]');
+      const counter = builder.querySelector<HTMLInputElement>('[data-artifact-count]');
+      const preview = builder.querySelector<HTMLElement>('[data-artifact-preview]');
+      const block = builder.closest<HTMLElement>('li[data-block]');
+
+      const renumberRows = () => {
+        const rows = rowsWrap ? (Array.from(rowsWrap.children) as HTMLElement[]) : [];
+        rows.forEach((row, i) => {
+          for (const el of row.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+            'input, textarea',
+          )) {
+            el.name = el.name.replace(/\.\d+\./, `.${i}.`);
+          }
+        });
+        if (counter) counter.value = String(rows.length);
+      };
+
+      /* One value per cell, keyed by the field name the server expects. The row
+         counter travels with them, because how many rows the writer is looking at
+         is part of what they are describing. */
+      const fields = () => {
+        const out: Record<string, string> = {};
+        for (const el of builder.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+          '[data-artifact-field]',
+        )) {
+          const key = el.getAttribute('data-artifact-field');
+          if (key) out[key] = el.value;
+        }
+        if (counter) {
+          const key = counter.name.split('__f_')[1] ?? '';
+          if (key) out[key] = counter.value;
+        }
+        return out;
+      };
+
+      /* Requests are numbered so a slow response cannot overwrite a newer
+         preview: the last keystroke wins, not the last reply. */
+      let drawn = 0;
+      const refresh = async () => {
+        if (!preview) return;
+        const tick = ++drawn;
+        try {
+          const res = await fetch('/api/artifact-preview', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              component: block?.querySelector<HTMLSelectElement>('[data-artifact-kind]')?.value,
+              title: block?.querySelector<HTMLInputElement>('input[name$="_ctitle"]')?.value,
+              fields: fields(),
+            }),
+          });
+          if (tick !== drawn) return;
+          preview.innerHTML = await res.text();
+        } catch {
+          if (tick !== drawn) return;
+          preview.innerHTML =
+            '<p class="meta">The preview could not be drawn. Saving still works, and the figure will render on the page.</p>';
+        }
+      };
+
+      addBtn?.addEventListener('click', () => {
+        if (!template || !rowsWrap) return;
+        const index = Number(counter?.value ?? 0);
+        const fragment = template.content.cloneNode(true) as DocumentFragment;
+        for (const el of fragment.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+          'input, textarea',
+        )) {
+          el.name = el.name.replace('__INDEX__', `${index}.`);
+        }
+        rowsWrap.appendChild(fragment);
+        renumberRows();
+        refresh();
+      });
+
+      builder.addEventListener('click', (e) => {
+        const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-artifact-remove-row]');
+        if (!btn) return;
+        e.preventDefault();
+        btn.closest<HTMLElement>('[data-artifact-row]')?.remove();
+        renumberRows();
+        refresh();
+      });
+
+      /* Debounced: this fires per keystroke and every call is a server render. */
+      let timer: number | undefined;
+      builder.addEventListener('input', () => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(refresh, 400);
+      });
+
+      refresh();
     }
   </script>
 </Base>

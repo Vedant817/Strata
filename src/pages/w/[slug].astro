@@ -20,6 +20,9 @@ import { isSaved, memoryKeyFor } from '../../lib/repo/reader';
 import { getMyHighlights, getPostHighlights } from '../../lib/repo/highlights';
 import { myReadingLists } from '../../lib/repo/taxonomy';
 import { askPost } from '../../lib/repo/ask';
+import { stressTest } from '../../lib/repo/stress';
+import { getNeighbourhood } from '../../lib/repo/taxonomy';
+import Neighbourhood from '../../components/Neighbourhood.astro';
 import { PROVIDERS } from '../../lib/ai/providers';
 import { houseKeyFor, freeClaimCaveat } from '../../lib/ai/catalog';
 import { resolveKey } from '../../lib/repo/providerKeys';
@@ -178,6 +181,10 @@ const errorNoteId = Astro.url.searchParams.get('note');
  *  asked-and-answered question is as shareable as the post itself. */
 const askQuery = (Astro.url.searchParams.get('ask') ?? '').trim().slice(0, 500);
 const askAsked = askQuery.length >= 3;
+/** Stress-test: opt-in via its own param, never on by default. It spends the
+ *  reader's quota across several model calls, so it must be something they
+ *  asked for, not something that runs because the page loaded. */
+const stressAsked = Astro.url.searchParams.get('stress') === '1';
 const askProviderParam = Astro.url.searchParams.get('askProvider') ?? '';
 const askModelParam = Astro.url.searchParams.get('askModel') ?? '';
 const askProvider = PROVIDERS.some((p) => p.id === askProviderParam) ? askProviderParam : '';
@@ -196,6 +203,23 @@ const askResult = askAsked
       anonId,
     )
   : null;
+
+/** The adversarial pass over the same passages Ask works from. */
+const stressResult = stressAsked
+  ? await stressTest(
+      post.id,
+      view.current.id,
+      identity.userId,
+      {
+        maxClaims: 4,
+        pref: { providerId: askProvider || null, model: askModel || null },
+        anonId,
+      },
+    )
+  : null;
+
+/** Where this post sits in the graph, or null if it is not in the public graph. */
+const neighbourhood = await getNeighbourhood(post.id).catch(() => null);
 
 /** Providers this reader could actually use: their own keys, plus the owner's. */
 const readerHasKey = new Set<string>();
@@ -828,6 +852,94 @@ const jsonLd = [
               )}
             </div>
           )}
+
+          {/* The stress-tester. Separate from Ask above rather than a mode of it,
+              because it is the opposite act: Ask serves the reader's question,
+              this attacks the post's own claims. Putting them in one box would
+              imply the reader is asking about themselves. */}
+          <div class="mt-8 border-t border-rule pt-6">
+            <h3 class="text-[1.0625rem] font-medium">Try to break this argument</h3>
+            <p class="mt-2 max-w-xl text-[0.9375rem] leading-relaxed text-ink-2">
+              The claims this post makes most concretely — the ones with numbers,
+              absolutes or prescriptions in them — put to a model that has read
+              only the sentence in question. Every objection quotes the post, and
+              a claim nothing can be said against is reported as standing.
+            </p>
+            {!stressAsked ? (
+              <form method="get" action="#stress" class="mt-3">
+                {askQuery && <input type="hidden" name="ask" value={askQuery} />}
+                {askProvider && <input type="hidden" name="askProvider" value={askProvider} />}
+                {askModel && <input type="hidden" name="askModel" value={askModel} />}
+                <button
+                  type="submit"
+                  name="stress"
+                  value="1"
+                  class="border border-ink bg-ink px-4 py-2 text-[0.9375rem] text-paper transition-colors hover:border-accent hover:bg-accent"
+                >
+                  Stress-test the argument
+                </button>
+                <p class="meta mt-2">
+                  {askProviders.length > 0
+                    ? "Costs a few model calls against your key or the site's."
+                    : 'No model key is configured, so this will pair each claim with its passage and report nothing it can ground.'}
+                </p>
+              </form>
+            ) : (
+              <div class="mt-4 max-w-2xl">
+                {stressResult!.error ? (
+                  <p class="border-l-2 border-ochre pl-3 text-[0.9375rem] leading-relaxed text-ink-2" role="status">
+                    {stressResult!.error}
+                  </p>
+                ) : stressResult!.claims.length === 0 ? (
+                  <p class="border-l-2 border-rule-strong pl-3 text-[0.9375rem] leading-relaxed text-ink-2">
+                    Nothing to attack.
+                  </p>
+                ) : (
+                  <>
+                    <ol class="space-y-6">
+                      {stressResult!.claims.map((c) => (
+                        <li class="border-l-2 border-rule-strong pl-3">
+                          <p class="meta">The claim</p>
+                          <p class="mt-1 text-[0.9375rem] leading-relaxed">“{c.quote}”</p>
+                          {c.objection ? (
+                            <>
+                              <p class="meta mt-3">The objection</p>
+                              <p class="mt-1 text-[0.9375rem] leading-relaxed text-ink-2">
+                                {c.objection}
+                              </p>
+                              {c.modelLabel && (
+                                <p class="meta mt-2">
+                                  ({c.modelLabel})
+                                </p>
+                              )}
+                            </>
+                          ) : (
+                            <p class="mt-3 border-l-2 border-pine pl-3 text-[0.9375rem] leading-relaxed text-ink-2">
+                              Nothing in the passage undermines this one. That is
+                              a result about the argument as written, not proof it
+                              is true.
+                            </p>
+                          )}
+                          <p class="meta mt-2">
+                            <a href={`#block-${c.blockId}`} class="no-underline hover:text-ink">
+                              Read the claim in context →
+                            </a>
+                          </p>
+                        </li>
+                      ))}
+                    </ol>
+                    <p class="meta mt-5">
+                      Every objection above was produced by a model that saw only
+                      the quoted sentence — no outside knowledge, no other
+                      article. A refusal to engage is reported rather than
+                      hidden, because an argument that survives this is not
+                      thereby proven.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </section>
 
         {myHighlightCount > 0 && (
@@ -867,6 +979,45 @@ const jsonLd = [
                 </li>
               ))}
             </ol>
+          </section>
+        )}
+
+        {/* Where this post sits. Only when it sits anywhere: an unlinked post
+            would render an axis with one tick on it, which says nothing. */}
+        {neighbourhood && neighbourhood.edges.length > 0 && (
+          <section aria-labelledby="neighbours-heading" class="border-t border-rule pt-6">
+            <h2 id="neighbours-heading" class="text-xl">Where this sits</h2>
+            <p class="mt-2 max-w-prose text-[0.9375rem] leading-relaxed text-ink-2">
+              {(() => {
+                /* Written out rather than assembled from fragments: the first
+                   version produced "leans on 1 other one" because the noun was
+                   interpolated separately from the number it belonged to. */
+                const leans = neighbourhood.leansOn.length;
+                const used = neighbourhood.isLeanedOn.length;
+                const leanedOn =
+                  leans === 0
+                    ? 'It leans on nothing else here.'
+                    : leans === 1
+                      ? 'It leans on 1 other post.'
+                      : `It leans on ${leans} other posts.`;
+                const pickedUp =
+                  used === 0
+                    ? ' Nothing has picked it up yet.'
+                    : used === 1
+                      ? ' One post has picked it up since.'
+                      : ` ${used} posts have picked it up since.`;
+                return leanedOn + pickedUp;
+              })()}{' '}
+              Oldest at the top, so a claim resting on something written after it
+              would be visible as an arc running upward.
+            </p>
+            <div class="mt-4 max-w-2xl">
+              <Neighbourhood
+                focus={neighbourhood.node}
+                nodes={neighbourhood.nodes}
+                edges={neighbourhood.edges}
+              />
+            </div>
           </section>
         )}
 

@@ -3,7 +3,8 @@ import Base from '../layouts/Base.astro';
 import { getIdentity } from '../lib/repo/auth';
 import { SESSION_COOKIE } from '../lib/repo/auth';
 import { listDeviceSessions } from '../lib/repo/device-sessions';
-import { listPasskeys } from '../lib/repo/passkeys';
+import { anyPasskeysEnrolled, listPasskeys } from '../lib/repo/passkeys';
+import PasskeySignIn from '../components/PasskeySignIn.astro';
 import { getProfile } from '../lib/repo/readerProfile';
 import {
   ANON_COOKIE,
@@ -37,6 +38,12 @@ const devices = identity.userId
   ? await listDeviceSessions(identity.userId, Astro.cookies.get(SESSION_COOKIE)?.value ?? null)
   : [];
 const passkeys = identity.userId ? await listPasskeys(identity.userId) : [];null;
+/* Does anyone on this site have a passkey? Only a count, and only to decide
+   whether offering sign-in is worth a line of copy: a passkey only exists after
+   a handle has been claimed, so on a site with none enrolled the button would
+   lead every reader to "no matching credential". Counting rows leaks nothing —
+   it is not scoped to the reader, and it is not a number any reader can query. */
+const passkeysRegistered = await anyPasskeysEnrolled();
 
 const depth = localDepth ?? profile?.depth ?? 'understand';
 const density = localDensity ?? profile?.density ?? 'comfortable';
@@ -139,6 +146,23 @@ const keyByProvider = new Map(myKeys.map((k) => [k.providerId, k]));
               this browser. Claim a handle and they will follow you to the next
               device.
             </p>
+            {/* The second door, offered where a reader is already told about the
+                first. Only rendered when a passkey exists on this site at all:
+                the ceremony cannot succeed without one, so on a site where
+                nobody has enrolled, the button would lead every reader to "no
+                matching credential". */}
+            {passkeysRegistered && (
+              <div class="mt-5 border-t border-rule pt-4">
+                <h3 class="text-[1.0625rem] font-medium">Already have a passkey?</h3>
+                <p class="mt-1 text-[0.9375rem] leading-relaxed text-ink-2">
+                  If you claimed a handle on another device, sign in here
+                  instead of claiming again.
+                </p>
+                <div class="mt-3">
+                  <PasskeySignIn next="/settings" />
+                </div>
+              </div>
+            )}
             <p class="mt-3">
               <a href="/write" class="text-[0.9375rem] text-ink no-underline hover:text-accent">
                 Set your depth once →
