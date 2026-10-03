@@ -1,6 +1,7 @@
 import {
   blockToPlainText,
   countWords,
+  parseBody,
   type Block,
 } from './blocks';
 
@@ -28,6 +29,8 @@ export type AutopsyKind = 'undefined_jargon' | 'restated_intro' | 'long_skipped_
 export interface AutopsyAsk {
   question: string;
   blockId: string | null;
+  /** Distinct asker when known (user id or anon id). Used only to count. */
+  asker?: string | null;
 }
 
 export interface AutopsyReach {
@@ -56,6 +59,12 @@ export interface AutopsyReport {
   findings: AutopsyFinding[];
   jargonChecked: number;
   sectionsChecked: number;
+  /**
+   * False when there was no version body to inspect. An empty successful
+   * check (`body: []`) is inspected; a missing or unparseable version is not.
+   * The loader must not present the latter as "nothing to report".
+   */
+  inspected: boolean;
 }
 
 const STOPWORDS = new Set(
@@ -92,7 +101,27 @@ export function autopsy(input: AutopsyInput): AutopsyReport {
     findings,
     jargonChecked: jargon.checked,
     sectionsChecked: long.checked,
+    inspected: true,
   };
+}
+
+/** Fail closed when the version is missing or is not a block document. */
+export function autopsyFromVersionBody(
+  raw: string | null | undefined,
+  input: Omit<AutopsyInput, 'body'> = {},
+): AutopsyReport {
+  if (raw == null || raw.trim() === '') {
+    return { findings: [], jargonChecked: 0, sectionsChecked: 0, inspected: false };
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return { findings: [], jargonChecked: 0, sectionsChecked: 0, inspected: false };
+    }
+  } catch {
+    return { findings: [], jargonChecked: 0, sectionsChecked: 0, inspected: false };
+  }
+  return autopsy({ ...input, body: parseBody(raw) });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -100,15 +129,15 @@ export function autopsy(input: AutopsyInput): AutopsyReport {
 /* -------------------------------------------------------------------------- */
 
 function jargonFindings(body: Block[], asks: AutopsyAsk[]): { findings: AutopsyFinding[]; checked: number } {
-  const primers = new Set(
-    body
-      .filter((b): b is Extract<Block, { type: 'primer' }> => b.type === 'primer')
-      .map((b) => b.term.trim().toLowerCase())
-      .filter(Boolean),
-  );
+  const primers = body
+    .filter((b): b is Extract<Block, { type: 'primer' }> => b.type === 'primer')
+    .map((b) => b.term.trim().toLowerCase())
+    .filter(Boolean);
 
-  const defined = new Set<string>(primers);
-  const firstUse = new Map<string, { blockId: string; paragraph: number; quote: string }>();
+  const defined = new Set<string>();
+  for (const primer of primers) addDefined(defined, primer);
+
+  const firstUse = new Map<string, { blockId: string; paragraph: number; quote: string; original: string }>();
   let paragraph = 0;
   let checked = 0;
 
@@ -121,14 +150,18 @@ function jargonFindings(body: Block[], asks: AutopsyAsk[]): { findings: AutopsyF
     if (terms.length === 0) continue;
 
     const lowered = text.toLowerCase();
-    for (const term of terms) {
-      const key = term.toLowerCase();
-      if (isDefinedIn(lowered, key) || primers.has(key)) defined.add(key);
+    for (const extracted of terms) {
+      const key = extracted.term.toLowerCase();
+      if (isDefinedIn(lowered, key) || isDefinedIn(lowered, extracted.term.split(/[\s-]+/)[0]!.toLowerCase())) {
+        addDefined(defined, key);
+      }
+      if (covers(defined, key)) continue;
       if (!firstUse.has(key) && (block.type === 'paragraph' || block.type === 'callout' || block.type === 'quote')) {
         firstUse.set(key, {
           blockId: block.id,
           paragraph: block.type === 'paragraph' ? paragraph : Math.max(1, paragraph),
-          quote: excerptAround(text, term),
+          quote: excerptAround(text, extracted.term),
+          original: extracted.term,
         });
       }
     }
@@ -138,19 +171,19 @@ function jargonFindings(body: Block[], asks: AutopsyAsk[]): { findings: AutopsyF
   const seen = new Set<string>();
 
   for (const [key, use] of firstUse) {
-    if (defined.has(key)) continue;
+    if (covers(defined, key)) continue;
     if (seen.has(key)) continue;
     checked++;
 
-    const askHits = asks.filter((a) => a.question.toLowerCase().includes(key));
-    const concept = isConceptTerm(key);
+    const askHits = asks.filter((a) => questionMentions(a.question, key));
+    const concept = isConceptTerm(use.original);
     if (!concept && askHits.length === 0) continue;
 
     seen.add(key);
     const para = use.paragraph || 1;
-    const askedShare = asks.length > 0 ? askHits.length / asks.length : 0;
     let detail = `Paragraph ${para} introduces \`${displayTerm(key, use.quote)}\` without definition.`;
-    if (asks.length >= 5 && askHits.length > 0) {
+    if (askHits.length > 0 && asks.length >= 5) {
+      const askedShare = askHits.length / asks.length;
       detail += ` ${Math.round(askedShare * 100)}% of readers ask about it.`;
     } else if (askHits.length > 0) {
       detail += ' Readers have asked about it.';
@@ -168,18 +201,27 @@ function jargonFindings(body: Block[], asks: AutopsyAsk[]): { findings: AutopsyF
   return { findings, checked };
 }
 
-function extractTerms(text: string): string[] {
-  const out: string[] = [];
+interface ExtractedTerm {
+  term: string;
+  kind: 'tick' | 'acronym';
+}
+
+function extractTerms(text: string): ExtractedTerm[] {
+  const out: ExtractedTerm[] = [];
   const ticks = text.matchAll(/`([^`\n]{2,40})`/g);
   for (const m of ticks) {
     const term = m[1]!.trim();
-    if (term && !looksLikeCode(term)) out.push(term);
+    if (term && !looksLikeCode(term)) out.push({ term, kind: 'tick' });
   }
-  const acronyms = text.matchAll(/\b([A-Z]{2,6})\b/g);
+  /* Acronyms inside backticks were already classified as code or as ticks.
+     Scanning the raw string again re-extracts `DEL` as DEL, then a substring
+     ask match (`model`.includes('del')) invents a reader percentage. */
+  const withoutTicks = text.replace(/`[^`\n]{1,40}`/g, ' ');
+  const acronyms = withoutTicks.matchAll(/\b([A-Z]{2,6})\b/g);
   for (const m of acronyms) {
     const term = m[1]!;
     if (COMMON_ACRONYM.has(term)) continue;
-    out.push(term);
+    out.push({ term, kind: 'acronym' });
   }
   return out;
 }
@@ -195,24 +237,44 @@ function looksLikeCode(term: string): boolean {
   if (CODE_IDENT.test(term)) return true;
   // Arithmetic in a backtick is a formula, not a term of art.
   // The cache post writes `ttl x writesPerSecond`; that is not jargon to define.
-  if (/[=/*+\<>()]/.test(term)) return true;
+  if (/[=/*+\^<>()]/.test(term)) return true;
   if (/\sx\s/i.test(term)) return true;
   return false;
 }
 
-function isConceptTerm(key: string): boolean {
-  if (looksLikeCode(key)) return false;
-  if (/\s/.test(key)) return true;
-  if (/-/.test(key)) return true;
-  if (/\d/.test(key)) return true;
-  if (/^[A-Z]{2,6}$/.test(key)) return true;
+function isConceptTerm(term: string): boolean {
+  if (looksLikeCode(term)) return false;
+  if (/\s/.test(term)) return true;
+  if (/-/.test(term)) return true;
+  if (/\d/.test(term)) return true;
+  if (/^[A-Z]{2,6}$/.test(term)) return true;
   return false;
+}
+
+function addDefined(defined: Set<string>, term: string) {
+  const key = term.toLowerCase().trim();
+  if (!key) return;
+  defined.add(key);
+  for (const part of key.split(/[\s-]+/)) {
+    if (part.length >= 2) defined.add(part);
+  }
+}
+
+/** A primer on `p99` covers first use of `p99 latency`. */
+function covers(defined: Set<string>, key: string): boolean {
+  if (defined.has(key)) return true;
+  return key.split(/[\s-]+/).some((part) => part.length >= 2 && defined.has(part));
 }
 
 function isDefinedIn(haystackLower: string, termLower: string): boolean {
   const escaped = termLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`(?:\`?${escaped}\`?)\\s+${DEFINITION.source}`, 'i');
   return re.test(haystackLower);
+}
+
+function questionMentions(question: string, term: string): boolean {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`, 'i').test(question);
 }
 
 function displayTerm(key: string, quote: string): string {
@@ -315,7 +377,10 @@ function longSkippedSection(
     if (first && last && canQuoteSkip) {
       const start = byId.get(first.id) ?? 0;
       const end = byId.get(last.id) ?? 0;
-      if (start >= 3) skipShare = Math.max(0, (start - end) / start);
+      /* The post-level cohort being 20 is not enough. Skip% is a claim about
+         the people who reached *this section*. Three of them is still a curve
+         drawn from three people. */
+      if (start >= cohortFloor) skipShare = Math.max(0, (start - end) / start);
     }
 
     // Length alone is not the finding the plan names. Without a skip signal we

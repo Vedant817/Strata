@@ -86,7 +86,11 @@ const audience = mine
               and skipped. Advisory — a finding is a sentence to act on, not a
               score.
             </p>
-            {autopsyReport.findings.length === 0 ? (
+            {!autopsyReport.inspected ? (
+              <p class="mt-4 border-l-2 border-rule-strong pl-3 text-[0.9375rem] text-ink-2">
+                This post has no body to inspect yet. The checks did not run.
+              </p>
+            ) : autopsyReport.findings.length === 0 ? (
               <p class="mt-4 border-l-2 border-rule-strong pl-3 text-[0.9375rem] text-ink-2">
                 Nothing to report.{' '}
                 {autopsyReport.jargonChecked === 1 ? '1 term' : `${autopsyReport.jargonChecked} terms`}{' '}

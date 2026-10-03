@@ -8,7 +8,7 @@
  * Run: npx tsx scripts/check-autopsy.ts
  */
 
-import { autopsy, type AutopsyAsk, type AutopsyReach } from '../src/lib/autopsy';
+import { autopsy, autopsyFromVersionBody, type AutopsyAsk, type AutopsyReach } from '../src/lib/autopsy';
 import type { Block } from '../src/lib/blocks';
 
 let passed = 0;
@@ -276,6 +276,107 @@ function filler(id: string, n: number): Block {
 {
   const report = autopsy({ body: [] });
   ok('empty body produces no findings', report.findings.length === 0);
+  ok('an empty array is still an inspected body', report.inspected === true);
+}
+
+/* -------------------------------------------------------------------------- */
+/* QA round 1 — cases the first 19 fixtures missed                             */
+/* -------------------------------------------------------------------------- */
+
+{
+  const body: Block[] = [
+    heading('h1', 'A'),
+    filler('a1', 50),
+    heading('h2', 'Long'),
+    filler('b1', 120),
+    filler('b2', 120),
+    heading('h3', 'C'),
+    filler('c1', 50),
+  ];
+  const report = autopsy({
+    body,
+    reach: [
+      { blockId: 'b1', reached: 3 },
+      { blockId: 'b2', reached: 1 },
+    ],
+    cohort: 20,
+    cohortFloor: 20,
+  });
+  const hit = report.findings.find((f) => f.kind === 'long_skipped_section');
+  ok('length still reports when only 3 people reached the section', !!hit, hit?.detail);
+  ok(
+    'skip% is not quoted from 3 section-reachers',
+    !!hit && !/readers skip/.test(hit.detail),
+    hit?.detail,
+  );
+}
+
+{
+  const body: Block[] = [
+    para('p1', '`DEL` returns.'),
+    para('p2', 'More prose about queues and disks and nothing else.'),
+    para('p3', 'Still more about caches.'),
+    para('p4', 'A fourth paragraph so the restated-intro rule stays quiet.'),
+    para('p5', 'Closing without repeating the opening.'),
+  ];
+  const asks: AutopsyAsk[] = [
+    { question: 'which model did you use?', blockId: null },
+    { question: 'is this deleted?', blockId: null },
+    { question: 'what model runs this', blockId: null },
+    { question: 'did the model change', blockId: null },
+    { question: 'which model is default', blockId: null },
+  ];
+  const report = autopsy({ body, asks });
+  ok(
+    'code-span acronym is not re-extracted, even when asks substring-match',
+    report.findings.every((f) => f.kind !== 'undefined_jargon'),
+  );
+}
+
+{
+  const body: Block[] = [
+    para('p1', 'The cost is `2^n` in the worst case.'),
+    para('p2', 'More prose about queues and disks and nothing else.'),
+    para('p3', 'Still more about caches.'),
+    para('p4', 'A fourth paragraph keeps the restated-intro rule quiet.'),
+    para('p5', 'Closing without repeating the opening.'),
+  ];
+  const report = autopsy({ body });
+  ok(
+    'exponent formulae do not fire as jargon',
+    report.findings.every((f) => f.kind !== 'undefined_jargon'),
+  );
+}
+
+{
+  const body: Block[] = [
+    primer('pr', 'p99', 'The value that 99% of requests came in under.'),
+    para('p1', 'We quote `p99 latency` because the mean lies.'),
+    para('p2', 'A primer on the short form covers the long form.'),
+    para('p3', 'Nothing more to add about the mean.'),
+    para('p4', 'Still nothing.'),
+    para('p5', 'Closing without repeating.'),
+  ];
+  const report = autopsy({ body });
+  ok(
+    'a primer on p99 covers `p99 latency`',
+    report.findings.every((f) => f.kind !== 'undefined_jargon'),
+  );
+}
+
+{
+  const missing = autopsyFromVersionBody(null);
+  ok('missing version is not inspected', missing.inspected === false);
+  ok('missing version has no findings', missing.findings.length === 0);
+
+  const badJson = autopsyFromVersionBody('{oops');
+  ok('unparseable body is not inspected', badJson.inspected === false);
+
+  const notArray = autopsyFromVersionBody('{"type":"paragraph"}');
+  ok('a non-array document is not inspected', notArray.inspected === false);
+
+  const emptyArray = autopsyFromVersionBody('[]');
+  ok('an empty block list is inspected', emptyArray.inspected === true);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
