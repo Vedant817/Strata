@@ -12,9 +12,11 @@ import { blockInlineSource } from '../lib/blocks';
 import { renderInline, slugify } from '../lib/inline';
 import { findQuoteRange, renderRanges, type InlineRange } from '../lib/inline-diff';
 import { highlightCode, type Highlighted } from '../lib/highlight';
+import { runnableFor } from '../lib/sandbox';
 import type { AnnotationView } from '../lib/repo/annotations';
 import NoteCard from './NoteCard.astro';
 import Artifact from './Artifact.astro';
+import CodeRunner from './CodeRunner.astro';
 
 interface Props {
   blocks: Block[];
@@ -217,33 +219,51 @@ const segHtml = (segments: Array<{ type: string; html?: string; text: string }>)
                  theme would double the work; highlighting in the browser would
                  ship a highlighter to the reader. */
               const h = codeHighlight.get(block.id) ?? ({} as Highlighted);
+              /* Two independent opt-ins, so a snippet is never runnable just
+                 because it is a code block. See docs/threat-model-sandbox.md. */
+              const run = runnableFor(block);
               return (
-                <figure class="code-figure">
-                  <figcaption class="code-bar">
-                    <span class="meta" data-code-lang>
-                      {h.lang ?? block.lang}
-                    </span>
-                    <button
-                      type="button"
-                      class="meta code-copy"
-                      data-code-copy
-                      aria-label="Copy this snippet"
-                    >
-                      Copy
-                    </button>
-                  </figcaption>
-                  <pre class="code-body" data-code={block.code} data-highlighted={h.paper ? '1' : '0'}>
-                    {h.paper ? (
-                      <>
-                        <code class="theme-paper" set:html={h.paper} />
-                        {h.ink && <code class="theme-ink" set:html={h.ink} />}
-                      </>
-                    ) : (
-                      <code>{block.code}</code>
-                    )}
-                  </pre>
-                  {block.caption && <figcaption class="meta mt-2">{block.caption}</figcaption>}
-                </figure>
+                <>
+                  <figure class="code-figure">
+                    <figcaption class="code-bar">
+                      <span class="meta" data-code-lang>
+                        {h.lang ?? block.lang}
+                      </span>
+                      {run && (
+                        <span class="meta" data-code-runnable={run.dialect}>
+                          runnable
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        class="meta code-copy"
+                        data-code-copy
+                        aria-label="Copy this snippet"
+                      >
+                        Copy
+                      </button>
+                    </figcaption>
+                    <pre class="code-body" data-code={block.code} data-highlighted={h.paper ? '1' : '0'}>
+                      {h.paper ? (
+                        <>
+                          <code class="theme-paper" set:html={h.paper} />
+                          {h.ink && <code class="theme-ink" set:html={h.ink} />}
+                        </>
+                      ) : (
+                        <code>{block.code}</code>
+                      )}
+                    </pre>
+                    {block.caption && <figcaption class="meta mt-2">{block.caption}</figcaption>}
+                  </figure>
+                  {run && (
+                    <CodeRunner
+                      code={block.code}
+                      dialect={run.dialect}
+                      lang={block.lang}
+                      caption={block.caption}
+                    />
+                  )}
+                </>
               );
             })()}
 

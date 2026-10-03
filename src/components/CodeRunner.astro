@@ -1,0 +1,217 @@
+---
+/**
+ * "Run this against my inputs" (PLAN.md §4.4, v1.1).
+ *
+ * The reader can edit the author's snippet and execute it in place, to see
+ * whether the claim still holds at their own numbers. Nothing is sent anywhere:
+ * the edited code stays in the page, and the frame is created only when Run is
+ * pressed, so an article nobody runs costs nothing.
+ *
+ * Why an iframe at all, when a Worker would isolate the thread: a Worker made on
+ * the page inherits the *page's* origin and can use anything the page's own CSP
+ * allows. The iframe supplies the boundary — an opaque origin plus
+ * `default-src 'none'` — and the Worker inside it supplies the thread. Neither
+ * half is optional. See docs/threat-model-sandbox.md.
+ *
+ * Rendered only when both opt-ins agree (server flag + the author's
+ * `runnable: true`), so a snippet is never runnable merely because it is a code
+ * block.
+ */
+import {
+  LIMITS,
+  SANDBOX_TOKENS,
+  buildSandboxDocument,
+  newNonce,
+  type RunDialect,
+} from '../lib/sandbox';
+
+interface Props {
+  code: string;
+  dialect: RunDialect;
+  lang: string;
+  caption?: string;
+}
+
+const { code, dialect, lang, caption } = Astro.props as Props;
+
+// Fresh per render, so a block's own code can never be promoted into harness
+// script by reusing a nonce from another block on the page.
+const nonce = newNonce();
+const srcdoc = buildSandboxDocument(nonce);
+
+const isWasm = dialect === 'wasm';
+const placeholder = isWasm
+  ? 'Paste base64-encoded WebAssembly exporting a run() function.'
+  : 'console.log("your answer")';
+
+const help = isWasm
+  ? 'Base64-encoded module. It must export run(); whatever run() returns is printed. Runs with no imports.'
+  : 'JavaScript. Whatever you console.log is printed. Runs in a worker with no network and no access to this page, for up to ' +
+    `${LIMITS.timeoutMs / 1000}s.`;
+---
+
+<section
+  class="mt-3 border border-rule bg-surface"
+  data-runner
+  data-dialect={dialect}
+  data-ready="0"
+  data-max-out={LIMITS.maxOutputChars}
+  data-timeout-ms={LIMITS.timeoutMs}
+>
+  <div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-rule px-4 py-2.5">
+    <h3 class="meta">Run this against my inputs</h3>
+    <button
+      type="button"
+      class="meta code-copy"
+      data-runner-run
+      aria-describedby="runner-help"
+    >
+      Run
+    </button>
+    <button type="button" class="meta code-copy" data-runner-reset>Reset</button>
+    <span class="meta ml-auto tabular-nums" data-runner-status>Not run yet</span>
+  </div>
+
+  <div class="px-4 pt-3">
+    <label class="sr-only" for={`runner-src-${nonce}`}>Editable {lang} snippet</label>
+    <textarea
+      id={`runner-src-${nonce}`}
+      data-runner-src
+      class="code-body min-h-[7rem] w-full resize-y font-mono text-[0.8125rem] leading-relaxed"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+      placeholder={placeholder}
+    >{code}</textarea>
+    <p class="meta mt-2 leading-relaxed" id="runner-help">{help}</p>
+  </div>
+
+  <div class="px-4 pb-3">
+    <label class="sr-only" for={`runner-out-${nonce}`}>Output</label>
+    <pre
+      id={`runner-out-${nonce}`}
+      class="code-body mt-3 min-h-[3rem] whitespace-pre-wrap"
+      data-runner-out
+      aria-live="polite"
+    >{caption ? `// ${caption}` : ''}</pre>
+  </div>
+
+  <!-- The boundary. Created lazily: srcdoc is assigned on first Run, so an
+       article with runnable blocks nobody touches loads no frame at all. -->
+  <iframe
+    class="h-px w-px border-0 opacity-0"
+    sandbox={SANDBOX_TOKENS.join(' ')}
+    referrerpolicy="no-referrer"
+    aria-hidden="true"
+    tabindex="-1"
+    title="Snippet sandbox"
+    data-runner-frame
+    data-srcdoc={srcdoc}
+  ></iframe>
+</section>
+
+<script>
+  /* First-party, inline, no framework. Per threat-model control 5 the reader's
+     edits are never persisted: nothing here touches localStorage,
+     sessionStorage, cookies, or the network. */
+
+  for (const host of document.querySelectorAll<HTMLElement>('[data-runner]')) {
+    const src = host.querySelector<HTMLTextAreaElement>('[data-runner-src]');
+    const out = host.querySelector<HTMLElement>('[data-runner-out]');
+    const status = host.querySelector<HTMLElement>('[data-runner-status]');
+    const frame = host.querySelector<HTMLIFrameElement>('[data-runner-frame]');
+    const runBtn = host.querySelector<HTMLButtonElement>('[data-runner-run]');
+    const resetBtn = host.querySelector<HTMLButtonElement>('[data-runner-reset]');
+    if (!src || !out || !status || !frame || !runBtn || !resetBtn) continue;
+
+    const original = src.value;
+    const dialect = host.dataset.dialect ?? 'javascript';
+    const maxOut = Number(host.dataset.maxOut ?? 8000);
+    const timeoutSec = Number(host.dataset.timeoutMs ?? 2000) / 1000;
+    let ready = false;
+    /** The frame's boundary report, if something has asked it for one. */
+    let lastProbe: unknown = null;
+
+    const setStatus = (text: string) => {
+      status.textContent = text;
+    };
+
+    const report = (msg: { out?: string; err?: string; over?: boolean; timeout?: boolean }) => {
+      if (msg.timeout) {
+        setStatus('Stopped');
+        out.textContent =
+          `That snippet ran past ${timeoutSec}s without finishing, so it was stopped. A tight loop will do this.`;
+        return;
+      }
+      if (msg.err) {
+        setStatus('Threw');
+        out.textContent = msg.out ? `${msg.out}\n\n${msg.err}` : msg.err;
+        return;
+      }
+      setStatus('Done');
+      const body = msg.out ?? '';
+      out.textContent = body === '' ? 'Ran. Nothing was printed.' : body;
+      if (msg.over) {
+        out.textContent += `\n\n[output capped at ${maxOut} characters]`;
+      }
+    };
+
+    // The frame posts {boot} on load. Until that arrives, queue the run rather
+    // than losing it to a race the reader would otherwise hit on a slow phone.
+    let queued: string | null = null;
+
+    window.addEventListener('message', (e) => {
+      if (e.source !== frame.contentWindow) return;
+      const msg = e.data as { type?: string; out?: string; err?: string; over?: boolean; timeout?: boolean };
+      if (!msg || typeof msg.type !== 'string') return;
+      if (msg.type === 'boot' || msg.type === 'ready') {
+        ready = true;
+        host.dataset.ready = '1';
+        setStatus('Not run yet');
+        if (queued !== null) {
+          const code = queued;
+          queued = null;
+          frame.contentWindow?.postMessage({ type: 'run', code, dialect }, '*');
+        }
+        return;
+      }
+      if (msg.type === 'probe' && lastProbe === null) {
+        // Kept on the element for a test to read. The frame cannot report its own
+        // origin truthfully, so this is where a browser check collects it.
+        lastProbe = msg;
+        host.dataset.probe = JSON.stringify(msg);
+      }
+      if (msg.type === 'result') report(msg);
+    });
+
+    runBtn.addEventListener('click', () => {
+      const code = src.value;
+      setStatus('Running');
+      if (!ready) {
+        // Assigning srcdoc is what starts the frame. Doing it here keeps the
+        // cost off the reader's path until they ask for it.
+        queued = code;
+        frame.srcdoc = frame.dataset.srcdoc ?? '';
+        return;
+      }
+      frame.contentWindow?.postMessage({ type: 'run', code, dialect }, '*');
+    });
+
+    resetBtn.addEventListener('click', () => {
+      src.value = original;
+      out.textContent = '';
+      setStatus('Not run yet');
+    });
+
+    /* Ask the frame to describe its own boundary. Nothing in the UI sends this:
+       it exists so the threat model's claims can be checked in a real browser,
+       and the answer is left on data-probe for whatever asked. The origin has to
+       come from here — inside the frame it is the string "null", which is not a
+       URL any request could be built from. */
+    host.addEventListener('runner:probe', () => {
+      lastProbe = null;
+      frame.contentWindow?.postMessage({ type: 'probe', origin: window.location.origin }, '*');
+    });
+  }
+</script>

@@ -21,7 +21,10 @@
     "test:smoke": "node scripts/smoke.mjs",
     "test:anchors": "tsx scripts/test-anchors.ts",
     "test:anchor-survival": "tsx scripts/prove-anchor-survival.ts",
-    "test:annotations": "tsx scripts/check-annotation-invariants.ts && tsx scripts/check-publication-notes.ts"
+    "test:annotations": "tsx scripts/check-annotation-invariants.ts && tsx scripts/check-publication-notes.ts && tsx scripts/check-migration-0020.ts",
+    "test:sandbox": "tsx scripts/check-sandbox-invariants.ts",
+    "test:sandbox:browser": "node scripts/check-sandbox-in-browser.mjs",
+    "test:migration": "tsx scripts/check-migration-0020.ts"
   },
   "dependencies": {
     "@astrojs/check": "^0.5.10",

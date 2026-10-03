@@ -41,6 +41,22 @@ export const codeBlock = z.object({
   lang: z.string().default('text'),
   code: z.string(),
   caption: z.string().default(''),
+  /**
+   * Offer "Run this against my inputs" on this block (PLAN.md §4.4, v1.1).
+   *
+   * Opt-in per block on purpose. A snippet being a `code` block says nothing
+   * about whether it is *runnable* — a Kubernetes manifest, a shell pipeline
+   * and a server config are all code, and none of them should grow a Run
+   * button because of where they sit in the schema. Also gated server-side by
+   * `RUNNABLE_CODE`; both must agree.
+   */
+  runnable: z.boolean().default(false),
+  /** The runnable dialect. Kept separate from `lang` so a fenced ```js block
+   *  stays highlighted as JavaScript while the sandbox runs it as such. */
+  run: z
+    .enum(['javascript', 'wasm'])
+    .optional()
+    .describe('Dialect the sandbox executes. Omit to infer from lang.'),
 });
 
 export const listBlock = z.object({
@@ -123,6 +139,7 @@ export const blockSchema = z.discriminatedUnion('type', [
 export type Block = z.infer<typeof blockSchema>;
 export type BlockType = Block['type'];
 export type ParagraphBlock = Extract<Block, { type: 'paragraph' }>;
+export type CodeBlock = Extract<Block, { type: 'code' }>;
 
 /** Blocks whose plain text participates in search, diffs and retrieval. */
 export const PROSE_BLOCK_TYPES: BlockType[] = [

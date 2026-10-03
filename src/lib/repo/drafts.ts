@@ -314,7 +314,7 @@ export function blankBlock(type: 'paragraph' | 'heading' | 'quote' | 'code' | 'l
     case 'quote':
       return { id, type: 'quote', text: '', attribution: '', layer: 'understand' };
     case 'code':
-      return { id, type: 'code', lang: 'text', code: '', caption: '', layer: 'master' };
+      return { id, type: 'code', lang: 'text', code: '', caption: '', runnable: false, layer: 'master' };
     case 'list':
       return { id, type: 'list', ordered: false, items: [''], layer: 'understand' };
     case 'interactive':

@@ -81,11 +81,43 @@ const POST_ID = String(postRows[0].postId);
 const POST_AUTHOR = String(postRows[0].postAuthorId);
 
 /* -------------------------------------------------------------------------- */
-/* 1. The migration preserved readers' existing reactions                      */
+/* 1. Reactions in the store are intact and joined                              */
 /* -------------------------------------------------------------------------- */
 
-ok('existing reactions survived migration 0020', (await count('select count(*) from annotation_reactions')) > 0,
-  `${await count('select count(*) from annotation_reactions')} rows`);
+/* This used to assert `count(*) > 0` and read as "migration 0020 preserved
+   reactions" — but nothing in the seed creates reactions, so on a fresh dev
+   database it asserted 0 > 0 and passed while proving nothing. Worse, a join
+   over zero rows is also green. So the reactions are put there first, on a note
+   that really exists, and then checked. Whether the *migration* preserves them
+   is a separate question with a separate answer: scripts/check-migration-0020.ts
+   builds a pre-0020 database, plants six reactions, applies 0020 and asserts. */
+{
+  const seeded = await rows(
+    `select a.id as noteId from annotations a where a.post_id is not null limit 1;`,
+  );
+  const NOTE = String(seeded[0]?.noteId ?? '');
+  if (NOTE) {
+    await client.batch(
+      [
+        { sql: `insert into annotation_reactions (annotation_id, voter_key, kind) values (?, ?, 'useful')`, args: [NOTE, 'probe-reactor-1'] },
+        { sql: `insert into annotation_reactions (annotation_id, voter_key, kind) values (?, ?, 'sharp')`, args: [NOTE, 'probe-reactor-2'] },
+      ],
+      'write',
+    );
+    const total = await count('select count(*) from annotation_reactions');
+    const joined = await count(`
+      select count(*) from annotation_reactions r
+        join annotations a on a.id = r.annotation_id;`);
+    ok('reactions are present to be checked at all', total >= 2, `${total} rows`);
+    eq('every reaction joins a note (0 orphans)', joined, total);
+    const kept = await count(
+      `select count(*) from annotation_reactions where voter_key like 'probe-reactor-%'`,
+    );
+    eq('both planted reactions are readable by the repo', kept, 2);
+    // Clean up so the count assertions elsewhere describe the fixture, not us.
+    await client.execute({ sql: `delete from annotation_reactions where voter_key like 'probe-reactor-%'` });
+  }
+}
 eq('integrity_check clean', String((await client.execute('pragma integrity_check')).rows[0][0]), 'ok');
 eq('no FK violations', (await client.execute('pragma foreign_key_check')).rows.length, 0);
 

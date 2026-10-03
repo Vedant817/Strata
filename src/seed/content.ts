@@ -165,6 +165,59 @@ const cacheV1 = doc(
   p(
     'Everything else is a way of deferring that conversation.',
   ),
+  h2('How wrong are you willing to be'),
+  p(
+    'The post above tells you to write the TTL down next to the data, which is only useful if you can compute what that number buys you. Here is the whole argument as something you can move. Change the write rate and the TTL and watch the stale fraction move with them — it is the number nobody puts in the incident review.',
+  ),
+  code(
+    'javascript',
+    `// invalidate + TTL across local replica caches.
+// A write bumps a shared version. Replicas serve their cached copy
+// until it is older than the TTL, so a write is invisible to them
+// for up to one TTL.
+
+const writesPerSecond = 5;
+const ttlSeconds = 30;
+const readsPerSecond = 200;
+const seconds = 120;
+
+// Seeded so two readers running this get the same answer.
+let seed = 12345;
+const rand = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+
+const replicas = Array.from({ length: 50 }, () => ({ version: -1, at: -Infinity }));
+let version = 0;
+let reads = 0;
+let stale = 0;
+
+const writeEvery = 1 / writesPerSecond;
+const readEvery = 1 / readsPerSecond;
+let nextWrite = writeEvery;
+let nextRead = readEvery;
+
+for (let t = 0; t < seconds; t += 1 / 1000) {
+  while (nextWrite <= t) { version += 1; nextWrite += writeEvery; }
+  while (nextRead <= t) {
+    const r = replicas[Math.floor(rand() * replicas.length)];
+    if (r.version === -1 || t - r.at > ttlSeconds) { r.version = version; r.at = t; }
+    reads += 1;
+    if (r.version < version) stale += 1;
+    nextRead += readEvery;
+  }
+}
+
+const fraction = stale / reads;
+console.log('writes/s   ', writesPerSecond);
+console.log('ttl        ', ttlSeconds + 's');
+console.log('reads      ', reads);
+console.log('stale      ', (fraction * 100).toFixed(2) + '%');
+console.log('worst-case ', (Math.min(1, ttlSeconds * writesPerSecond) * 100).toFixed(2) + '%');`,
+    'Raise the write rate until the stale fraction stops improving. That is the point where more invalidation machinery buys you nothing and only the TTL is left.',
+    true,
+  ),
+  p(
+    'The worst-case line is the arithmetic ceiling: a replica can be at most one TTL behind, so at most `ttl x writesPerSecond` of its reads can be stale. Once that product is greater than one, you are promising readers they may see a value from any write inside the window, and no amount of fan-out changes the number — only the TTL does.',
+  ),
 );
 
 const cacheV2 = applyPatches(cacheV1, [

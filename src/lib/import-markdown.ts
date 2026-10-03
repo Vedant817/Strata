@@ -103,7 +103,17 @@ export function markdownToBlocks(filename: string, src: string, mtimeMs = 0): Im
         i++;
       }
       i++; // closing fence (or EOF)
-      blocks.push({ id: nanoid(), type: 'code', lang, code: code.join('\n'), caption: '', layer: 'master' });
+      blocks.push({
+        id: nanoid(),
+        type: 'code',
+        lang,
+        code: code.join('\n'),
+        caption: '',
+        // An imported snippet is never assumed runnable. Making one executable is
+        // an author's deliberate act, not something a fence should imply.
+        runnable: false,
+        layer: 'master',
+      });
       continue;
     }
 

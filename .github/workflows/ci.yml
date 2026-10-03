@@ -34,6 +34,20 @@ jobs:
       - name: Anchor resolution
         run: npm run test:anchors
 
+      # Runnable code blocks are the one place this product executes code a reader
+      # can change. The threat model gates the feature; these assertions are what
+      # stop a later edit from quietly dropping the sandbox token list or the CSP.
+      - name: Sandbox invariants
+        run: npm run test:sandbox
+
+      # Migration 0020 rebuilds the annotations table, and a rebuild in the wrong
+      # order deletes every reaction a reader has left. The rehearsal plants
+      # reactions on a pre-0020 schema and applies the real migration to it,
+      # because "reactions survived" asserted against a seeded database is
+      # asserted against zero rows and proves nothing.
+      - name: Migration rehearsal
+        run: npm run test:migration
+
       # Artifact props are the one place a writer-authored payload is coerced on
       # the way into a draft. The array case is not hypothetical: an earlier
       # scalar-only rule emptied the data in every existing curve and breakdown

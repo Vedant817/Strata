@@ -53,12 +53,13 @@ export const primer = (term: string, text: string): Block => ({
   layer: 'understand',
 });
 
-export const code = (lang: string, code: string, caption = ''): Block => ({
+export const code = (lang: string, code: string, caption = '', runnable = false): Block => ({
   id: id('co'),
   type: 'code',
   lang,
   code,
   caption,
+  runnable,
   layer: core,
 });
 
