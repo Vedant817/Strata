@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const DIST = path.resolve(process.cwd(), 'dist/client');
+const SERVER = path.resolve(process.cwd(), 'dist/server');
 
 /* Deliberately far below the plan's <100KB target: the reading path ships no
    external JS, so any real budget here is a regression guard. A framework
@@ -33,6 +34,52 @@ const BUDGET = {
 } as const;
 
 const KB = 1024;
+
+/**
+ * The size of the stylesheet Astro inlined into the server bundle.
+ *
+ * astro.config.mjs sets `inlineStylesheets: 'always'`, because a render-blocking
+ * `<link>` costs a whole extra round-trip and that was most of the LCP. Counting
+ * only dist/client would then report 0KB of CSS and quietly stop enforcing
+ * anything, so the stylesheet is measured where it now lives: as a string inside
+ * the SSR chunk.
+ *
+ * The string is located by Tailwind's own licence banner, which is what the
+ * built stylesheet starts with, and ends at the first *unescaped* quote — the CSS
+ * is full of `\"` inside quoted font names and content values, so a naive scan for
+ * the closing quote stops about a kilobyte in.
+ */
+function inlineStylesheet() {
+  if (!fs.existsSync(SERVER)) return { name: '(no server build)', bytes: 0 };
+  let best = { name: '(none)', bytes: 0 };
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!/\.(mjs|js)$/.test(entry.name)) continue;
+      const text = fs.readFileSync(full, 'utf8');
+      const start = text.indexOf('/*! tailwindcss');
+      if (start === -1) continue;
+      let i = start;
+      while (i < text.length) {
+        const ch = text[i];
+        if (ch === '\\') {
+          i += 2;
+          continue;
+        }
+        if (ch === '"') break;
+        i++;
+      }
+      const bytes = i - start;
+      if (bytes > best.bytes) best = { name: path.relative(SERVER, full), bytes };
+    }
+  };
+  walk(SERVER);
+  return best;
+}
 
 function assets(ext: string) {
   if (!fs.existsSync(DIST)) return [];
@@ -66,15 +113,18 @@ if (!fs.existsSync(DIST)) {
 
 const js = assets('.js');
 const css = assets('.css');
+const inlineCss = inlineStylesheet();
 
 const totalJs = js.reduce((n, a) => n + a.bytes, 0);
 const largest = js.length ? js.reduce((a, b) => (a.bytes > b.bytes ? a : b)) : null;
-const totalCss = css.reduce((n, a) => n + a.bytes, 0);
+// The inlined stylesheet is a per-request cost — every page pays all of it — so
+// it is added to the external CSS rather than counted separately.
+const totalCss = css.reduce((n, a) => n + a.bytes, 0) + inlineCss.bytes;
 
 const rows = [
   row('client JS, total', totalJs, BUDGET.totalJsKb),
   ...(largest ? [row(`client JS, largest (${largest.name})`, largest.bytes, BUDGET.largestJsKb)] : []),
-  row('CSS, total', totalCss, BUDGET.totalCssKb),
+  row('CSS, every page ships', totalCss, BUDGET.totalCssKb),
 ];
 
 console.log('\nperformance budget\n');
@@ -83,6 +133,11 @@ for (const r of rows) {
 }
 if (js.length === 0) {
   console.log('\n  No external client JS — the reading path is HTML + inlined scripts only.');
+}
+if (inlineCss.bytes > 0) {
+  console.log(
+    `\n  CSS is inlined in ${path.basename(inlineCss.name)}: no stylesheet request blocks first paint.`,
+  );
 }
 
 const failed = rows.filter((r) => !r.ok);

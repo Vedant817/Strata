@@ -84,6 +84,19 @@ jobs:
       - name: Performance budget
         run: npm run perf:budget
 
+      # Compression is what stands between a 138KB article and a reader on a slow
+      # link, and the failure it guards against is invisible: the response is
+      # still a valid 200 with all the right bytes, just uncompressed, so every
+      # other check in this file passes while LCP doubles.
+      - name: Response compression
+        run: npm run test:compress
+
+      # The plan's three numbers. Needs a browser, which ubuntu-latest has.
+      # Kept last and after the build because it audits the built server: a perf
+      # number measured against the dev server describes the dev server.
+      - name: Field metrics (LCP / CLS / INP)
+        run: npm run test:field
+
       # The database is a local libsql file and migrations run on first query,
       # so CI needs no service container. Seeding gives the route check real
       # posts to render rather than a wall of 404s. The smoke script boots the

@@ -27,6 +27,7 @@
 import { defineMiddleware } from 'astro:middleware';
 import { SESSION_COOKIE } from './lib/repo/auth';
 import { touchSession } from './lib/repo/device-sessions';
+import { compressResponse } from './lib/compress';
 
 /** Routes whose HTML is identical for every visitor. */
 const PUBLIC_EXACT = new Set([
@@ -87,7 +88,17 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   response.headers.set('cache-control', header);
   response.headers.append('vary', 'Accept-Encoding');
-  return response;
+
+  /* Compress, or do not claim to. `Vary: Accept-Encoding` above is a promise
+     that the bytes change with the encoding, and on the standalone Node server
+     nothing was keeping it: an article went out at 138KB. On a 1.6Mbps link
+     that is roughly 700ms before the first word, which is the whole LCP budget
+     spent on transfer.
+
+     Vercel's edge compresses before this sees the response, and compressing
+     there too would spend CPU to save nothing, so it is skipped when the
+     platform is already doing it. */
+  return compressResponse(response, context.request.headers.get('accept-encoding'));
 });
 
 function headerFor(pathname: string): string {

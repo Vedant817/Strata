@@ -35,7 +35,23 @@ export default defineConfig({
     ssr: { external: ['@resvg/resvg-js'] },
   },
   build: {
-    inlineStylesheets: 'auto',
+    /* Inline the stylesheet. `auto` (Astro's default) only inlines below 4KB,
+       so 42KB shipped as an external `<link>` — and a render-blocking link is
+       not free: on the Slow 4G profile PLAN.md §2.5 measures against, the extra
+       request costs 562ms of latency before the first pixel, which was more
+       than half of the 1817ms LCP on the homepage.
+
+       Inlining trades that round-trip for bytes the reader already has in the
+       document they are waiting for anyway. It costs ~215ms of transfer at
+       1.6Mbps and saves 562ms of latency, and the CSS compresses inside the
+       HTML: the whole page went out at 27.9KB brotli. On a warm connection the
+       extra bytes are ~35ms. The trade is clearly worth it, and only on the
+       first view — after that the document is in cache either way.
+
+       scripts/perf-budget.ts reads the inlined CSS out of the built HTML, so
+       this does not make the CSS budget stop counting: it makes it count the
+       bytes a reader actually downloads. */
+    inlineStylesheets: 'always',
   },
   security: {
     checkOrigin: true,

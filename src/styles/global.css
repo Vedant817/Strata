@@ -21,6 +21,57 @@
 @import '@fontsource/ibm-plex-mono/latin-400.css';
 @import '@fontsource/ibm-plex-mono/latin-500.css';
 
+/* Metric-compatible fallbacks.
+
+   `font-display: swap` means the first paint uses whatever the browser already
+   has, and the real face arrives a moment later. Without a fallback whose
+   metrics match, every line reflows at that moment — measured at CLS 0.18 on the
+   homepage, three webfont loads each moving the <h1>, against a budget of 0.02.
+   That is the reader watching the page jump, and it is the single largest
+   layout-shift source in the product.
+
+   `size-adjust`, `ascent-override` and `descent-override` make a local fallback
+   occupy the same box the webfont will, so the swap changes what the glyphs look
+   like and not where the lines sit.
+
+   The numbers below were measured, not estimated. scripts/check-font-metrics.mjs
+   renders the real face and the fallback in the same browser and compares three
+   things: advance width, baseline position within the line box, and the line box
+   itself. Two findings that are easy to get wrong from the spec text:
+
+     - `size-adjust` **also scales the metric overrides**. Setting
+       `ascent-override: 115.63%` (IBM Plex Serif's own ascent) alongside
+       `size-adjust: 106.92%` renders a baseline 1px low and a line box 2px
+       tall; dividing the overrides by the size-adjust reproduces the webfont's
+       geometry exactly.
+     - Georgia is 6.5% narrower than IBM Plex Serif, which is the difference
+       between lines wrapping the same way and every line re-wrapping on swap.
+
+   These describe the local faces, not pretend to be Plex: the shapes still
+   differ at the moment of swap, and no metric override can fix that. What it
+   removes is the *movement*, which is the part a reader perceives as broken. */
+@font-face {
+  font-family: 'Plex Serif Fallback';
+  src: local('Georgia'), local('Times New Roman'), local('Times');
+  size-adjust: 106.92%;
+  ascent-override: 108.15%;
+  descent-override: 26.31%;
+}
+@font-face {
+  font-family: 'Plex Sans Fallback';
+  src: local('Helvetica Neue'), local('Arial'), local('Liberation Sans');
+  size-adjust: 101.36%;
+  ascent-override: 101.75%;
+  descent-override: 27.75%;
+}
+@font-face {
+  font-family: 'Plex Mono Fallback';
+  src: local('Menlo'), local('Consolas'), local('DejaVu Sans Mono');
+  size-adjust: 109.13%;
+  ascent-override: 94.5%;
+  descent-override: 25.78%;
+}
+
 /* ---------------------------------------------------------------------------
    2. Semantic tokens
    ------------------------------------------------------------------------ */
@@ -123,9 +174,13 @@
   --color-pine: var(--pine);
   --color-danger: var(--danger);
 
-  --font-serif: 'IBM Plex Serif', ui-serif, Georgia, serif;
-  --font-sans: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  /* The fallback face sits in second position, not behind `ui-serif`: a
+     generic keyword resolves to whatever the OS thinks is serif, which on some
+     platforms is a serif with entirely different metrics. The named metric-
+     compatible face above is what keeps the swap from moving anything. */
+  --font-serif: 'IBM Plex Serif', 'Plex Serif Fallback', ui-serif, Georgia, serif;
+  --font-sans: 'IBM Plex Sans Variable', 'Plex Sans Fallback', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Plex Mono Fallback', ui-monospace, monospace;
 
   --text-xs: var(--t-xs);
   --text-sm: var(--t-sm);

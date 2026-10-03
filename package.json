@@ -29,7 +29,10 @@
     "test:autopsy": "tsx scripts/check-autopsy.ts",
     "test:audience": "tsx scripts/check-audience.ts",
     "test:recommend": "tsx scripts/check-recommend.ts",
-    "test:citation": "tsx scripts/check-citation-card.ts"
+    "test:citation": "tsx scripts/check-citation-card.ts",
+    "test:compress": "tsx scripts/check-compress.ts",
+    "test:field": "node scripts/field-metrics.mjs",
+    "test:fonts:browser": "node scripts/check-font-metrics.mjs"
   },
   "dependencies": {
     "@astrojs/check": "^0.5.10",
@@ -63,6 +66,7 @@
   "devDependencies": {
     "@types/diff": "^7.0.2",
     "drizzle-kit": "^0.31.11",
+    "lighthouse": "^13.5.0",
     "tsx": "^4.23.15"
   },
   "overrides": {
