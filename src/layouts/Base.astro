@@ -1,5 +1,6 @@
 ---
 import { resolvePrefs, THEME_COOKIE, DENSITY_COOKIE, ensureAnonId, type ReaderPrefs } from '../lib/prefs';
+import { safeJsonLd } from '../lib/jsonld';
 import SiteHeader from '../components/SiteHeader.astro';
 import SiteFooter from '../components/SiteFooter.astro';
 import '../styles/global.css';
@@ -37,8 +38,11 @@ const prefs = Astro.props.prefs ?? resolvePrefs(Astro.cookies as never, anonId);
 const site = Astro.site ?? new URL('http://localhost:4321');
 const pageTitle = !title || title === 'Strata' ? 'Strata' : `${title} · Strata`;
 const canonicalUrl = canonical ? new URL(canonical, site).href : Astro.url.href;
+/* `safeJsonLd`, not `JSON.stringify`: a reader-controlled Ask question reaches
+   this graph, and an unescaped `</script>` inside it would close the block and
+   execute whatever followed. See src/lib/jsonld.ts. */
 const graph = jsonLd.length
-  ? JSON.stringify({ '@context': 'https://schema.org', '@graph': jsonLd })
+  ? safeJsonLd({ '@context': 'https://schema.org', '@graph': jsonLd })
   : null;
 ---
 

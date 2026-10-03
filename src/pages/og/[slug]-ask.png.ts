@@ -37,6 +37,9 @@ export const GET: APIRoute = async ({ params, url }) => {
     changes: card.quotes.map((q) => ({ kind: 'changed' as const, text: q.text })),
     footerLeft: card.footerLeft,
     footerRight: card.footerRight,
+    // Citation cards hold the question on the frame and cap each quote to one
+    // line; the default layout's three-line quotes push the title off the card.
+    layout: 'citation',
   });
 
   return new Response(png as BodyInit, {

@@ -63,6 +63,9 @@ export interface ShareCard {
   footerRight: string;
   /** Optional changed-line preview: the card's reason to exist. */
   changes?: Array<{ kind: 'added' | 'removed' | 'changed'; text: string }>;
+  /** Citation cards keep the question on the frame; three long quotes
+   *  otherwise push the title off a 630px card. */
+  layout?: 'default' | 'citation';
 }
 
 const PAPER = '#faf9f5';
@@ -89,6 +92,9 @@ const mono = (size: number, color: string, extra: Style = {}): Style => ({
 });
 
 export async function renderShareCard(card: ShareCard): Promise<Uint8Array> {
+  const citation = card.layout === 'citation';
+  const hasChanges = Boolean(card.changes && card.changes.length > 0);
+  const quoteCap = citation ? 2 : 3;
   const tree = el(
     'div',
     {
@@ -109,13 +115,16 @@ export async function renderShareCard(card: ShareCard): Promise<Uint8Array> {
     el(
       'div',
       {
-        fontSize: card.changes && card.changes.length > 0 ? 64 : 74,
-        lineHeight: 1.1,
+        fontSize: citation ? 48 : hasChanges ? 64 : 74,
+        lineHeight: 1.15,
         fontWeight: 500,
         color: INK,
         marginTop: 32,
+        // satori drops `undefined` values, so the key is only set for citation
+        // cards rather than being present-and-undefined, which it rejects.
+        ...(citation ? { maxHeight: 120 } : {}),
         display: '-webkit-box',
-        WebkitLineClamp: card.changes && card.changes.length > 0 ? 2 : 3,
+        WebkitLineClamp: citation || hasChanges ? 2 : 3,
         WebkitBoxOrient: 'vertical',
         overflow: 'hidden',
       },
@@ -125,25 +134,25 @@ export async function renderShareCard(card: ShareCard): Promise<Uint8Array> {
       ? el(
           'div',
           {
-            fontSize: 33,
+            fontSize: citation ? 28 : 33,
             lineHeight: 1.4,
             color: INK_2,
-            marginTop: 20,
+            marginTop: 16,
             display: '-webkit-box',
-            WebkitLineClamp: 2,
+            WebkitLineClamp: citation ? 1 : 2,
             WebkitBoxOrient: 'vertical',
             overflow: 'hidden',
           },
           card.dek,
         )
       : null,
-    el('div', { flex: 1 }),
-    ...(card.changes && card.changes.length > 0
+    el('div', { flex: citation ? 0 : 1 }),
+    ...(hasChanges
       ? [
           el(
             'div',
-            { display: 'flex', flexDirection: 'column', gap: 12, marginTop: 28 },
-            ...card.changes.slice(0, 3).map((c) =>
+            { display: 'flex', flexDirection: 'column', gap: citation ? 10 : 12, marginTop: 24 },
+            ...card.changes!.slice(0, quoteCap).map((c) =>
               el(
                 'div',
                 { display: 'flex', gap: 16, alignItems: 'flex-start' },
@@ -155,11 +164,11 @@ export async function renderShareCard(card: ShareCard): Promise<Uint8Array> {
                 el(
                   'div',
                   {
-                    fontSize: 27,
+                    fontSize: citation ? 24 : 27,
                     lineHeight: 1.35,
                     color: INK_2,
                     display: '-webkit-box',
-                    WebkitLineClamp: 2,
+                    WebkitLineClamp: citation ? 1 : 2,
                     WebkitBoxOrient: 'vertical',
                     overflow: 'hidden',
                   },

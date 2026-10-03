@@ -11,10 +11,14 @@
 
 import {
   citationCard,
+  citationIsShareable,
   citationOgPath,
   citationSharePath,
+  citationShareText,
+  isUnfurlCrawler,
   stripAskMarkup,
 } from '../src/lib/citation-card';
+import { safeJsonLd } from '../src/lib/jsonld';
 
 let passed = 0;
 let failed = 0;
@@ -113,6 +117,108 @@ function ok(label: string, condition: boolean, detail = '') {
   const blob = JSON.stringify(card);
   ok('card JSON has no anon id field', blob.includes('anon') === false);
   ok('card JSON has no askedBy field', blob.includes('askedBy') === false);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Injection: the question is a reader-controlled URL parameter, and it ends up */
+/* in a `<script type="application/ld+json">` on the article page              */
+/* -------------------------------------------------------------------------- */
+
+{
+  const payload = `</script><script>alert(1)</script>`;
+  const card = citationCard({
+    question: payload,
+    postTitle: 'T',
+    authorName: 'A',
+    passages: [{ blockId: 'b1', quote: 'the article' }],
+  });
+  ok('a script-closing question does not survive into the card', !card.question.includes('<script'), card.question);
+  ok('nor as markup at all', !/[<>]/.test(card.question), card.question);
+  /* The browser tab reads the title. Astro escapes it, so this is cosmetic —
+     but a tab showing `</script><script>alert(1)</script>` is a bad
+     advertisement, and an escape sequence does not help in a tab. */
+  ok('a share title built from it carries no markup', !/“[^”]*[<>]/.test(`“${card.question}” — T`), `“${card.question}”`);
+
+  /* The real shape of the bug: JSON.stringify does not escape `<`, so the
+     rendered `<script>` block can be closed from inside the data. Asserted on
+     the actual rendered string, not on the escape helper in isolation. */
+  const graph = safeJsonLd({
+    '@context': 'https://schema.org',
+    '@graph': [{ '@type': 'QAPage', mainEntity: { name: payload } }],
+  });
+  const rendered = `<script type="application/ld+json">${graph}</script>`;
+  ok('the JSON-LD block is the only script in the document', (rendered.match(/<script/g) ?? []).length === 1, rendered);
+  ok('nothing after the payload position is parsed as markup', rendered.indexOf('</script>') === rendered.length - '</script>'.length);
+
+  /* And it must still parse as the JSON it claims to be, or escaping the tag
+     would have corrupted the structured data to buy security. */
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(graph);
+  } catch (err) {
+    ok('escaped JSON-LD still parses', false, String(err));
+  }
+  ok('escaped JSON-LD still parses', parsed !== null);
+  ok(
+    'and the payload survives intact as data',
+    JSON.stringify(parsed).includes('</script><script>alert(1)</script>'),
+  );
+}
+
+{
+  /* An entity-encoded payload must not survive decoding into a tag. Decoding
+     before stripping would turn `&lt;script&gt;` into a real tag on a second
+     pass, which is why stripAskMarkup strips twice. */
+  const card = citationCard({
+    question: 'what does &lt;script&gt; do?',
+    postTitle: 'T',
+    authorName: 'A',
+    passages: [{ blockId: 'b1', quote: '&lt;mark&gt;not a tag&lt;/mark&gt; &amp; not markup' }],
+  });
+  ok('an encoded tag in the question is not markup', !/[<>]/.test(card.question), card.question);
+  ok('an encoded tag in a quote is not markup', !/[<>]/.test(card.quotes[0]?.text ?? 'x'), card.quotes[0]?.text);
+  ok('but the ampersand entity still decodes', (card.quotes[0]?.text ?? '').includes('&'), card.quotes[0]?.text);
+}
+
+/* -------------------------------------------------------------------------- */
+/* A shared link must not look like a reader asking a question                 */
+/* -------------------------------------------------------------------------- */
+
+for (const ua of [
+  'Twitterbot/1.0',
+  'facebookexternalhit/1.1',
+  'Slackbot-LinkExpanding 1.0',
+  'Discordbot/2.0',
+  'Mozilla/5.0 (compatible; Googlebot/2.1)',
+  'WhatsApp/2.0',
+  'LinkedInBot/1.0',
+  'TelegramBot',
+  'redditbot',
+  'Slack-ImgProxy',
+]) {
+  ok(`recognises ${ua.split('/')[0]}`, isUnfurlCrawler(ua));
+}
+ok('a real browser is not treated as a crawler', !isUnfurlCrawler('Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/140 Safari/537.36'));
+ok('a missing user-agent is not treated as a crawler', !isUnfurlCrawler(null));
+ok('an empty user-agent is not treated as a crawler', !isUnfurlCrawler(''));
+
+{
+  ok('a matched answer is shareable', citationIsShareable({ matched: true }));
+  ok('an unmatched question is not', !citationIsShareable({ matched: false }));
+  ok('a rate-limited answer is not', !citationIsShareable({ matched: true, error: 'limit' }));
+  ok('a refused answer is not', !citationIsShareable({ matched: false, error: 'expired' }));
+}
+
+{
+  /* The share description is the quotes. If it ever came from the model prose
+     instead, a crawler would cache a generated summary as if it were the post. */
+  const text = citationShareText([
+    { quote: 'Summing <mark>p99</mark> latencies is a documented error.' },
+    { quote: 'The tail of the sum is not the sum of the tails.' },
+  ]);
+  ok('share text is the quotes, plain', !text.includes('<mark>') && text.includes('p99'), text);
+  ok('share text is capped', citationShareText([{ quote: 'x'.repeat(500) }]).length <= 240);
+  ok('empty passages give an empty string', citationShareText([]) === '');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -20,7 +20,14 @@ import { isSaved, memoryKeyFor } from '../../lib/repo/reader';
 import { getMyHighlights, getPostHighlights } from '../../lib/repo/highlights';
 import { myReadingLists } from '../../lib/repo/taxonomy';
 import { askPost } from '../../lib/repo/ask';
-import { citationOgPath, citationSharePath, stripAskMarkup } from '../../lib/citation-card';
+import {
+  citationIsShareable,
+  citationOgPath,
+  citationSharePath,
+  citationShareText,
+  cleanAskQuestion,
+  isUnfurlCrawler,
+} from '../../lib/citation-card';
 import { stressTest } from '../../lib/repo/stress';
 import { getNeighbourhood } from '../../lib/repo/taxonomy';
 import Neighbourhood from '../../components/Neighbourhood.astro';
@@ -186,7 +193,13 @@ const errorNoteId = Astro.url.searchParams.get('note');
 /** Ask this article. A GET, so an answer is a link anyone can open — and so a
  *  asked-and-answered question is as shareable as the post itself. */
 const askQuery = (Astro.url.searchParams.get('ask') ?? '').trim().slice(0, 500);
-const askAsked = askQuery.length >= 3;
+/* A link-preview fetcher opening the shared URL is not a reader asking a
+   question. Left as-is it would spend a quota slot, call a model, and file a
+   row in the writer's confusion list — the shared link would manufacture the
+   very signal the writer reads as "readers are stuck here". The card still
+   renders for the crawler (that is the unfurl), it just never bills or logs. */
+const askFromCrawler = isUnfurlCrawler(Astro.request.headers.get('user-agent'));
+const askAsked = askQuery.length >= 3 && !askFromCrawler;
 /** Stress-test: opt-in via its own param, never on by default. It spends the
  *  reader's quota across several model calls, so it must be something they
  *  asked for, not something that runs because the page loaded. */
@@ -263,13 +276,22 @@ const description = post.seoDescription || stripInline(post.dek);
 /** An answered Ask is its own share object. The unfurl uses the citation card
  *  (quotes from this post), not the living-diff card, so a pasted question
  *  looks like research rather than a changelog. Rate-limited responses are
- *  not answers and must not become cards. */
-const askShareable = Boolean(askAsked && askResult && !askResult.error);
-const shareTitle = askShareable ? `“${askQuery}” — ${post.title}` : title;
+ *  not answers and must not become cards.
+ *
+ *  The card is chosen from the *quotes*, never the model prose. A card quoting
+ *  a generated summary would spread something that can go stale independently of
+ *  the post; the quotes are the post, so they stay true as long as the revision
+ *  does. */
+const askShareable = Boolean(
+  askResult && citationIsShareable({ matched: askResult.matched, error: askResult.error }),
+);
+/* `askQuery`, not the raw param, so the title cannot carry markup. Astro escapes
+   it for the HTML, so this is cosmetic rather than a hole — but a browser tab
+   reading `</script><script>alert(1)</script>` is a bad advertisement for the
+   product, and the tab is not somewhere an escape sequence helps. */
+const shareTitle = askShareable ? `“${cleanAskQuestion(askQuery)}” — ${post.title}` : title;
 const shareDescription = askShareable
-  ? askResult!.matched
-    ? stripAskMarkup(askResult!.answer || askResult!.passages[0]?.quote || description).slice(0, 240)
-    : "This isn't covered in the article."
+  ? citationShareText(askResult!.passages) || description
   : description;
 const shareImage = askShareable
   ? citationOgPath(post.slug, askQuery)
@@ -304,9 +326,11 @@ const jsonLd = [
               ? {
                   acceptedAnswer: {
                     '@type': 'Answer',
-                    text: stripAskMarkup(
-                      askResult!.answer || askResult!.passages.map((p) => p.quote).join('\n\n'),
-                    ),
+                    // The quotes, not the model prose. Structured data is the one
+                    // place a generated summary would outlive its grounding: a
+                    // crawler that caches this answer keeps it after the
+                    // article has been revised out from under it.
+                    text: askResult!.passages.map((p) => p.quote).join('\n\n'),
                   },
                 }
               : {}),
