@@ -50,8 +50,10 @@ npm run dev          # http://localhost:4321
 The seed is idempotent and safe to re-run after editing `src/seed/content.ts`.
 
 Key env vars (see `.env.example`): `DATABASE_URL` + `DATABASE_AUTH_TOKEN` (Turso),
-`RESEND_API_KEY`, `CRON_SECRET`, `SITE_URL`, `KEY_ENCRYPTION_SECRET` (BYOK),
-`GROQ_API_KEY` / `OPENROUTER_API_KEY` (house AI keys, free-tier only).
+`BREVO_API_KEY` + `MAIL_FROM` (the only mail transport — see `src/lib/mail.ts` for
+why there is no fallback), `CRON_SECRET`, `SITE_URL`, `KEY_ENCRYPTION_SECRET`
+(BYOK), `GROQ_API_KEY` / `OPENROUTER_API_KEY` (house AI keys, free-tier only),
+`STRATA_RUNNABLE_CODE` (opt-in for runnable code blocks, off by default).
 
 ## Deploying
 

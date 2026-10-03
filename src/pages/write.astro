@@ -160,8 +160,9 @@ const claimPath = activeToken ? `/claim/${activeToken}` : null;
                 <>
                   <p class="mt-2 text-[0.9375rem]">
                     <strong>No mailer is configured on this site, so the link is here instead of in an inbox.</strong>{' '}
-                    Set <code class="border border-rule bg-sunken px-1">RESEND_API_KEY</code> and it
-                    travels by email like a real signup.
+                    Set <code class="border border-rule bg-sunken px-1">BREVO_API_KEY</code> and a{' '}
+                    <code class="border border-rule bg-sunken px-1">MAIL_FROM</code> matching the
+                    sender you verified, and it travels by email like a real signup.
                   </p>
                   {claimPath && (
                     <p class="mt-2">

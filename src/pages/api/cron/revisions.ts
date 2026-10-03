@@ -60,7 +60,7 @@ export const POST: APIRoute = async ({ request }) => {
       JSON.stringify({
         sent: 0,
         posts: notices.length,
-        reason: 'No RESEND_API_KEY configured. Notices built but not sent.',
+        reason: 'No BREVO_API_KEY / MAIL_FROM configured. Notices built but not sent.',
         pending: notices.map((n) => n.slug),
       }),
       { headers: { 'content-type': 'application/json' } },

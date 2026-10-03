@@ -47,7 +47,7 @@ export const POST: APIRoute = async ({ request }) => {
     return new Response(
       JSON.stringify({
         sent: 0,
-        reason: 'No RESEND_API_KEY configured. Digest built but not sent.',
+        reason: 'No BREVO_API_KEY / MAIL_FROM configured. Digest built but not sent.',
         items: digest.items.length,
         subscribers: subscribers.length,
       }),
