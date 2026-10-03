@@ -64,6 +64,9 @@ jobs:
       - name: Audience simulator
         run: npm run test:audience
 
+      - name: After-read recommendations
+        run: npm run test:recommend
+
       # WebAuthn parsing. This decoder reads attacker-supplied attestation bytes,
       # so its caps and its refusal paths are the security properties, and they
       # need proving on every build rather than when a keypress goes wrong.

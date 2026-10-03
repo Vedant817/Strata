@@ -3,6 +3,8 @@ import Base from '../layouts/Base.astro';
 import { resolvePrefs, ANON_COOKIE } from '../lib/prefs';
 import { getIdentity } from '../lib/repo/auth';
 import { getReaderMemory } from '../lib/repo/reader';
+import { recommendAfterRead } from '../lib/repo/recommend';
+import NextReads from '../components/NextReads.astro';
 import { ago } from '../lib/format';
 
 /**
@@ -21,6 +23,8 @@ const identity = await getIdentity(Astro.cookies);
 
 const memory = await getReaderMemory(anonId, identity.userId);
 const behind = memory.entries.filter((e) => e.behind);
+const nextReads =
+  memory.entries.length > 0 ? await recommendAfterRead(anonId, identity.userId) : [];
 ---
 
 <Base
@@ -42,6 +46,8 @@ const behind = memory.entries.filter((e) => e.behind);
 
   <div class="shell py-12">
     <div class="max-w-2xl space-y-14">
+      {nextReads.length > 0 && <NextReads items={nextReads} />}
+
       {behind.length > 0 && (
         <section aria-labelledby="moved-heading">
           <h2 id="moved-heading" class="text-xl">Moved since you read</h2>

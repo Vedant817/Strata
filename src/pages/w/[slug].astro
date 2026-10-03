@@ -23,6 +23,8 @@ import { askPost } from '../../lib/repo/ask';
 import { stressTest } from '../../lib/repo/stress';
 import { getNeighbourhood } from '../../lib/repo/taxonomy';
 import Neighbourhood from '../../components/Neighbourhood.astro';
+import NextReads from '../../components/NextReads.astro';
+import { recommendAfterRead } from '../../lib/repo/recommend';
 import { PROVIDERS } from '../../lib/ai/providers';
 import { houseKeyFor, freeClaimCaveat } from '../../lib/ai/catalog';
 import { resolveKey } from '../../lib/repo/providerKeys';
@@ -75,6 +77,9 @@ void (async () => {
 
 const versions = await getVersions(post.id);
 const lastSeen = await getLastReceipt(anonId, post.id);
+const nextReads = lastSeen
+  ? await recommendAfterRead(anonId, identity.userId, post.id)
+  : [];
 const hasChangesSince = Boolean(
   lastSeen && lastSeen.versionId !== view.current.id && lastSeen.versionNumber < view.current.versionNumber,
 );
@@ -1020,6 +1025,14 @@ const jsonLd = [
             </div>
           </section>
         )}
+
+        {
+          nextReads.length > 0 && (
+            <div class="border-t border-rule pt-6">
+              <NextReads items={nextReads} />
+            </div>
+          )
+        }
 
         <section aria-labelledby="revise-heading" class="border-t border-rule pt-6">
           <h2 id="revise-heading" class="text-xl">When this changes</h2>

@@ -1,0 +1,36 @@
+---
+import type { Recommendation } from '../lib/recommend';
+import { plural } from '../lib/format';
+
+interface Props {
+  items: Recommendation[];
+}
+
+const { items } = Astro.props;
+---
+
+{
+  items.length > 0 && (
+    <section aria-labelledby="next-reads-heading">
+      <h2 id="next-reads-heading" class="text-xl">After that</h2>
+      <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+        Three posts chosen from what you just did — one short, one longer, one
+        that has been revised. Not a feed, and not a form.
+      </p>
+      <ol class="mt-4 space-y-4">
+        {items.map((item) => (
+          <li class="border-b border-rule pb-4 last:border-b-0">
+            <p class="meta">{item.reason}</p>
+            <a href={`/w/${item.slug}`} class="mt-1 block font-medium no-underline hover:text-accent">
+              {item.title}
+            </a>
+            {item.dek && (
+              <p class="mt-1 text-[0.9375rem] leading-relaxed text-ink-2">{item.dek}</p>
+            )}
+            <p class="meta mt-1">{plural(item.readingMinutes, 'minute')}</p>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
