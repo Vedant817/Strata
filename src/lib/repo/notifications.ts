@@ -221,7 +221,9 @@ export async function listMutes(userId: string | null): Promise<NotificationKind
  */
 export async function notifyMentions(input: {
   body: string;
-  postId: string;
+  /** Null for a note about the publication rather than an article. The mention
+   *  still fires; there is simply no post to link it to. */
+  postId: string | null;
   annotationId: string;
   fromUserId: string | null;
   fromAnonKey: string | null;

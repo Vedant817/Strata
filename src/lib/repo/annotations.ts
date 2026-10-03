@@ -147,18 +147,125 @@ export interface AnnotationView {
   replies: number;
 }
 
-const reactionCounts = sql<Record<string, number>>`
+const reactionCounts = sql<Record<string, number> | string>`
   (select coalesce(json_group_object(kind, n), '{}') from (
      select kind, count(*) as n from annotation_reactions
      where annotation_id = ${annotations.id} group by kind
    ))`;
 
+/**
+ * `json_group_object` comes back from the libsql driver as a *string*, not an
+ * object, so spreading it directly yielded `{"0":"{","1":"\"",...}` and every
+ * reaction count silently rendered as zero. Types said `Record<string, number>`
+ * and were satisfied; only asserting on the rendered value found it.
+ */
+function parseReactionCounts(
+  raw: Record<string, number> | string | null,
+): { useful: number; insightful: number; source: number } {
+  const empty = { useful: 0, insightful: 0, source: 0 };
+  if (raw == null) return empty;
+  if (typeof raw === 'object') return { ...empty, ...raw };
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (parsed === null || typeof parsed !== 'object') return empty;
+    // Only ever expose the three known kinds, each coerced to a number, so a
+    // malformed row cannot inject a string into a rendered count.
+    return {
+      useful: Number(parsed.useful ?? 0) || 0,
+      insightful: Number(parsed.insightful ?? 0) || 0,
+      source: Number(parsed.source ?? 0) || 0,
+    };
+  } catch {
+    return empty;
+  }
+}
+
 const replyCounts = sql<number>`
   (select count(*) from annotations r
    where r.parent_id = ${annotations.id} and r.status = 'visible')`;
 
+/** Columns every note listing needs. Shared by the article and publication
+ *  scopes so the two views cannot drift apart in what they expose. */
+const noteSelect = {
+  note: annotations,
+  authorHandle: users.handle,
+  authorName: users.displayName,
+  // The version the note is *pinned* to, which is not the current one once the
+  // post has been revised. Getting this wrong tells a reader the note argues
+  // with the version it is currently shown alongside.
+  pinnedVersion: sql<number | null>`(
+    select version_number from post_versions pv where pv.id = ${annotations.versionId}
+  )`,
+  reactions: reactionCounts,
+  replies: replyCounts,
+} as const;
+
+type NoteRow = {
+  note: typeof annotations.$inferSelect;
+  authorHandle: string | null;
+  authorName: string | null;
+  pinnedVersion: number | null;
+  reactions: Record<string, number> | string | null;
+  replies: number | null;
+};
+
+interface Viewer {
+  anonId?: string | null;
+  authorId?: string | null;
+}
+
+/** Shared mapping from a note row to its public view.
+ *
+ *  `postId`/`blockId`/`anchor` are nullable in the schema because a note may be
+ *  about the publication rather than an article, but an *article* note always
+ *  has all three. Callers of this mapper are the two scope listings, which have
+ *  already filtered; the narrowing below turns that SQL-level fact into a
+ *  type-level one so no consumer has to handle a null it cannot encounter. */
+function toView(row: NoteRow, viewer: Viewer): AnnotationView | null {
+  const { note } = row;
+  // Fails closed on scope. The WHERE clause already excludes these, so this is
+  // belt-and-braces: it makes "a publication note never renders in a margin"
+  // a property of the mapper, not a fact a future query has to remember.
+  if (!note.postId || !note.blockId || !note.anchor) return null;
+
+  const parsed = safeAnchor(note.anchor);
+  const isAuthorOnly = AUTHOR_ONLY_KINDS.includes(note.kind as AnnotationKind);
+
+  return {
+    id: note.id,
+    postId: note.postId,
+    blockId: note.blockId,
+    kind: note.kind as AnnotationKind,
+    body: note.body,
+    anchor: parsed ?? { blockId: note.blockId, start: 0, end: 0, quote: '', prefix: '', suffix: '' },
+    // Resolution is filled in by the caller, which is the only side that knows
+    // what the reader is currently looking at.
+    resolved: { status: 'lost' as const, start: 0, end: 0 },
+    onOlderRevision: false,
+    isAccepted: note.isAccepted,
+    isResolved: note.isResolved,
+    isPrivate: note.isPrivate,
+    createdAt: note.createdAt,
+    editedAt: note.editedAt,
+    parentId: note.parentId,
+    authorId: note.authorId,
+    // An author-only note is only ever shown when attributed to someone, so an
+    // unattributed author_note is treated as a plain comment.
+    authorName: isAuthorOnly && !note.authorId ? 'Anonymous' : (row.authorName ?? note.guestName ?? 'Anonymous'),
+    authorHandle: row.authorHandle,
+    isAuthor: Boolean(note.authorId && note.authorId === viewer.authorId),
+    isMine: Boolean(
+      (note.authorId && viewer.authorId && note.authorId === viewer.authorId) ||
+        (note.anonId && viewer.anonId && note.anonId === viewer.anonId),
+    ),
+    versionNumber: Number(row.pinnedVersion ?? 1),
+    reactions: parseReactionCounts(row.reactions),
+    replies: Number(row.replies ?? 0),
+  };
+}
+
 /**
- * All public notes on a post, newest first, with anchors resolved against the
+ * All public notes on a post, oldest first, with anchors resolved against the
  * given block texts. Replies are attached to their parent in the caller.
  */
 export async function listAnnotations(
@@ -168,19 +275,7 @@ export async function listAnnotations(
 ): Promise<AnnotationView[]> {
   const database = await readyDb();
   const rows = await database
-    .select({
-      note: annotations,
-      authorHandle: users.handle,
-      authorName: users.displayName,
-      // The version the note is *pinned* to, which is not the current one once
-      // the post has been revised. Getting this wrong tells a reader the note
-      // argues with the version it is currently shown alongside.
-      pinnedVersion: sql<number>`(
-        select version_number from post_versions pv where pv.id = ${annotations.versionId}
-      )`,
-      reactions: reactionCounts,
-      replies: replyCounts,
-    })
+    .select(noteSelect)
     .from(annotations)
     .leftJoin(users, eq(annotations.authorId, users.id))
     .where(
@@ -194,52 +289,101 @@ export async function listAnnotations(
 
   return rows
     .map((row) => {
+      // Narrow the anchor group before anything parses it. `toView` repeats the
+      // check so the guarantee does not depend on this call order, but doing it
+      // here keeps the raw JSON in hand for `safeAnchor`, which takes the
+      // serialised form, not the resolved object.
+      if (!row.note.anchor) return null;
+      const view = toView(row, opts);
+      if (!view) return null;
       const parsed = safeAnchor(row.note.anchor);
       // Match against what the reader saw, not the stored markup. Anchors are
       // created from rendered selections, so resolving against raw text with
       // `*emphasis*` markers would mark every note on a formatted sentence as
       // lost. See the write path for the same normalization.
-      const text = stripInline(blockTexts.get(row.note.blockId) ?? '');
+      const text = stripInline(blockTexts.get(view.blockId) ?? '');
       const resolved = parsed ? resolveAnchor(parsed, text) : { status: 'lost' as const, start: 0, end: 0 };
-      const isAuthor = Boolean(row.note.authorId && row.note.authorId === opts.authorId);
-      const isAuthorOnly = AUTHOR_ONLY_KINDS.includes(row.note.kind as AnnotationKind);
-
       return {
-        id: row.note.id,
-        postId: row.note.postId,
-        blockId: row.note.blockId,
-        kind: row.note.kind as AnnotationKind,
-        body: row.note.body,
-        anchor: parsed ?? { blockId: row.note.blockId, start: 0, end: 0, quote: '', prefix: '', suffix: '' },
+        ...view,
         resolved,
-        onOlderRevision:
-          row.note.versionId !== opts.currentVersionId && resolved.status !== 'lost',
-        isAccepted: row.note.isAccepted,
-        isResolved: row.note.isResolved,
-        isPrivate: row.note.isPrivate,
-        createdAt: row.note.createdAt,
-        editedAt: row.note.editedAt,
-        parentId: row.note.parentId,
-        authorId: row.note.authorId,
-        // An author-only note is only ever shown when attributed to someone, so
-        // an unattributed author_note is treated as a plain comment.
-        authorName: isAuthorOnly && !row.note.authorId ? 'Anonymous' : (row.authorName ?? row.note.guestName ?? 'Anonymous'),
-        authorHandle: row.authorHandle,
-        isAuthor,
-        isMine: Boolean(
-          (row.note.authorId && opts.authorId && row.note.authorId === opts.authorId) ||
-            (row.note.anonId && opts.anonId && row.note.anonId === opts.anonId),
-        ),
-        versionNumber: Number(row.pinnedVersion ?? 1),
-        reactions: { useful: 0, insightful: 0, source: 0, ...(row.reactions ?? {}) },
-        replies: Number(row.replies ?? 0),
+        onOlderRevision: row.note.versionId !== opts.currentVersionId && resolved.status !== 'lost',
       } satisfies AnnotationView;
     })
+    .filter((n): n is AnnotationView => n !== null)
     .filter((n) => {
       // Author-only notes are not public; they belong to the author's channel.
       if (AUTHOR_ONLY_KINDS.includes(n.kind) && !n.isAuthor) return false;
       return true;
     });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Publication scope                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A note about the publication rather than an article.
+ *
+ * Same table as a marginal note, so threading, reactions, reporting and
+ * author-delete all behave identically — that inheritance is the reason this is
+ * a nullable column instead of a second table. What a publication note does not
+ * have is an anchor: there is no sentence it argues with, so it has no block, no
+ * text offset and no version to be pinned to. `versionNumber` is null for the
+ * same reason.
+ */
+export interface PublicationNoteView {
+  id: string;
+  body: string;
+  kind: AnnotationKind;
+  createdAt: number;
+  editedAt: number | null;
+  parentId: string | null;
+  authorId: string | null;
+  authorName: string;
+  authorHandle: string | null;
+  isMine: boolean;
+  reactions: { useful: number; insightful: number; source: number };
+  replies: number;
+}
+
+/** Notes about the publication, oldest first. Replies come back as rows too;
+ *  the caller groups them, exactly as it does for an article's margin. */
+export async function listPublicationAnnotations(
+  opts: { anonId?: string | null; authorId?: string | null } = {},
+): Promise<PublicationNoteView[]> {
+  const database = await readyDb();
+  const rows = await database
+    .select(noteSelect)
+    .from(annotations)
+    .leftJoin(users, eq(annotations.authorId, users.id))
+    .where(and(isNull(annotations.postId), eq(annotations.status, 'visible'), eq(annotations.isPrivate, false)))
+    .orderBy(asc(annotations.createdAt));
+
+  return rows
+    .map((row): PublicationNoteView | null => {
+      const { note } = row;
+      // Symmetric narrowing: an article note is never a publication note.
+      if (note.postId !== null || note.blockId !== null || note.anchor !== null) return null;
+      const isMine = Boolean(
+        (note.authorId && opts.authorId && note.authorId === opts.authorId) ||
+          (note.anonId && opts.anonId && note.anonId === opts.anonId),
+      );
+      return {
+        id: note.id,
+        body: note.body,
+        kind: note.kind as AnnotationKind,
+        createdAt: note.createdAt,
+        editedAt: note.editedAt,
+        parentId: note.parentId,
+        authorId: note.authorId,
+        authorName: row.authorName ?? note.guestName ?? 'Anonymous',
+        authorHandle: row.authorHandle,
+        isMine,
+        reactions: parseReactionCounts(row.reactions),
+        replies: Number(row.replies ?? 0),
+      };
+    })
+    .filter((n): n is PublicationNoteView => n !== null);
 }
 
 function safeAnchor(json: string): Anchor | null {
@@ -287,6 +431,17 @@ export interface CreateAnnotationInput {
   isPrivate?: boolean;
 }
 
+/** A note about the publication, rather than an article. No anchor, because
+ *  there is no sentence for it to argue with. */
+export interface CreatePublicationNoteInput {
+  body: string;
+  kind?: AnnotationKind;
+  anonId?: string | null;
+  authorId?: string | null;
+  guestName?: string | null;
+  parentId?: string | null;
+}
+
 export async function createAnnotation(input: CreateAnnotationInput): Promise<Annotation> {
   const database = await readyDb();
   const row: typeof annotations.$inferInsert = {
@@ -306,6 +461,50 @@ export async function createAnnotation(input: CreateAnnotationInput): Promise<An
   };
   await database.insert(annotations).values(row);
   return row as Annotation;
+}
+
+export async function createPublicationNote(
+  input: CreatePublicationNoteInput,
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const body = input.body.trim();
+  if (!body) return { ok: false, error: 'Say something first.' };
+  const database = await readyDb();
+
+  // A reply must land in its parent's scope, so validate before inserting.
+  // Inserting a publication-scoped reply under an article parent (or the
+  // reverse) is the one way a thread could straddle both surfaces.
+  let parentId: string | null = null;
+  if (input.parentId) {
+    const parent = await getAnnotation(input.parentId);
+    if (!parent || parent.status !== 'visible') {
+      return { ok: false, error: 'The note you replied to is gone.' };
+    }
+    if (parent.postId !== null) {
+      return { ok: false, error: 'That note belongs to an article, not the publication.' };
+    }
+    parentId = parent.id;
+  }
+
+  const id = nanoid();
+  await database.insert(annotations).values({
+    id,
+    postId: null,
+    versionId: null,
+    blockId: null,
+    anchor: null,
+    body,
+    // An author-only kind is meaningless here: there is no post whose author
+    // could be speaking. Force the ordinary kind rather than let a caller
+    // invent a publication "author channel" nobody reads.
+    kind: AUTHOR_ONLY_KINDS.includes(input.kind as AnnotationKind) ? 'comment' : (input.kind ?? 'comment'),
+    parentId,
+    authorId: input.authorId ?? null,
+    anonId: input.anonId ?? null,
+    guestName: input.guestName ?? null,
+    isPrivate: false,
+    createdAt: Date.now(),
+  });
+  return { ok: true, id };
 }
 
 export async function editAnnotation(id: string, body: string, authorId: string | null, anonId: string) {
@@ -349,6 +548,10 @@ export async function acceptAnnotation(id: string) {
   const database = await readyDb();
   const note = await getAnnotation(id);
   if (!note) return false;
+  // Acceptance folds a note into a post's history. A publication note has no
+  // post and no revision, so there is nothing to fold it into — refusing beats
+  // setting a flag that nothing reads.
+  if (note.postId === null) return false;
   await database.update(annotations).set({ isAccepted: true, isResolved: true }).where(eq(annotations.id, id));
   return true;
 }
@@ -369,14 +572,27 @@ export async function replyToAnnotation(input: {
   if (!parent || parent.status !== 'visible') {
     return { ok: false, error: 'The note you replied to is gone.' };
   }
-  const anchor = safeAnchor(parent.anchor);
+  // A publication note has no parent post and therefore no anchor. Its replies
+  // are publication notes too, so hand them to the publication write path
+  // rather than reporting a missing anchor as a fault — the anchor is supposed
+  // to be missing.
+  if (parent.postId === null) {
+    const created = await createPublicationNote({
+      body: input.body,
+      anonId: input.anonId,
+      authorId: input.authorId,
+      parentId: parent.id,
+    });
+    return created.ok ? { ok: true, id: created.id } : { ok: false, error: created.error };
+  }
+  const anchor = parent.anchor ? safeAnchor(parent.anchor) : null;
   if (!anchor) {
     return { ok: false, error: 'That note has lost its anchor, so it cannot be replied to.' };
   }
   const created = await createAnnotation({
     postId: parent.postId,
-    versionId: parent.versionId,
-    blockId: parent.blockId,
+    versionId: parent.versionId as string,
+    blockId: parent.blockId as string,
     anchor,
     body: input.body,
     kind: 'comment',
@@ -490,6 +706,33 @@ export async function countParticipants(postId: string) {
   return Number(row?.n ?? 0);
 }
 
+/** Distinct people arguing about the publication itself. */
+export async function countPublicationParticipants() {
+  const database = await readyDb();
+  const [row] = await database
+    .select({ n: sql<number>`count(distinct coalesce(annotations.author_id, annotations.anon_id))` })
+    .from(annotations)
+    .where(
+      and(
+        isNull(annotations.postId),
+        eq(annotations.status, 'visible'),
+        eq(annotations.isPrivate, false),
+      ),
+    );
+  return Number(row?.n ?? 0);
+}
+
+/** Reported publication notes awaiting a human. See `getReportedNotes`. */
+export async function countReportedPublicationNotes() {
+  const database = await readyDb();
+  const [row] = await database
+    .select({ n: sql<number>`count(distinct ${annotationReports.annotationId})` })
+    .from(annotationReports)
+    .innerJoin(annotations, eq(annotationReports.annotationId, annotations.id))
+    .where(isNull(annotations.postId));
+  return Number(row?.n ?? 0);
+}
+
 export { or, inArray };
 
 /* -------------------------------------------------------------------------- */
@@ -531,7 +774,15 @@ export interface ReportedNote {
   latestReason: string;
 }
 
-/** Notes on this author's posts that readers flagged, most-reported first. */
+/** Notes on this author's posts that readers flagged, most-reported first.
+ *
+ *  Deliberately article-scoped: the `innerJoin` drops publication notes, because
+ *  this queue is "problems with your articles" and a publication note belongs
+ *  to no author. Readers can still report those notes and the report is stored,
+ *  so rather than let that gap be invisible,
+ *  `countReportedPublicationNotes` makes it measurable. Routing those reports to
+ *  a human needs an owner concept this codebase does not have yet; inventing
+ *  one here would be a worse answer than a measurable hole. */
 export async function getReportedNotes(authorId: string): Promise<ReportedNote[]> {
   const database = await readyDb();
   const rows = await database
@@ -552,10 +803,15 @@ export async function getReportedNotes(authorId: string): Promise<ReportedNote[]
     .where(eq(posts.authorId, authorId))
     .groupBy(annotations.id)
     .orderBy(sql`count(${annotationReports.id}) DESC`);
-  return rows.map((r) => ({
-    ...r,
-    reports: Number(r.reports),
-  }));
+  return rows
+    // The innerJoin already guarantees a matching post, so a null here would
+    // mean the join invariant broke. Dropping rather than asserting keeps the
+    // return type honest: `ReportedNote.postId` is non-nullable by construction.
+    .filter((r): r is typeof r & { postId: string } => r.postId !== null)
+    .map((r) => ({
+      ...r,
+      reports: Number(r.reports),
+    }));
 }
 
 /** Hide or restore a note. Only the post's author — checked here, not trusted. */
@@ -567,6 +823,11 @@ export async function setNoteStatus(
   const database = await readyDb();
   const note = await getAnnotation(noteId);
   if (!note) return false;
+  // Fails closed on a publication note. There is no post, so there is no post
+  // author, so no caller of this function is the right owner. Returning false
+  // is the safe answer; the alternative — letting the author check fall through
+  // on a NULL join — would be a silent no-op that reads like success.
+  if (note.postId === null) return false;
   const [post] = await database
     .select({ authorId: posts.authorId })
     .from(posts)

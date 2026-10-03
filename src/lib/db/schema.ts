@@ -383,20 +383,34 @@ export const annotations = sqliteTable(
   'annotations',
   {
     id: text('id').primaryKey(),
-    postId: text('post_id')
-      .notNull()
-      .references(() => posts.id, { onDelete: 'cascade' }),
-    /** Version this note was written against. Notes never silently re-attach. */
-    versionId: text('version_id')
-      .notNull()
-      .references(() => postVersions.id, { onDelete: 'cascade' }),
-    blockId: text('block_id').notNull(),
+    /**
+     * Scope. `NULL` means the note is about *the publication* rather than an
+     * article, which is why this is a nullable column and not a second table:
+     * threading, reactions, owner delete, reporting and mute are all inherited
+     * instead of reimplemented.
+     *
+     * Article pages filter `eq(postId, x)`, and `eq` excludes NULL for free, so
+     * a publication note cannot appear on an article page without someone adding
+     * an explicit `or(isNull(postId))` to a query. The leak is prevented by the
+     * shape of the filter rather than by remembering to check.
+     */
+    postId: text('post_id').references(() => posts.id, { onDelete: 'cascade' }),
+    /**
+     * Version this note was written against. Notes never silently re-attach.
+     * Nullable with `postId`: an anchored note always has both, and a
+     * publication note has neither.
+     */
+    versionId: text('version_id').references(() => postVersions.id, { onDelete: 'cascade' }),
+    blockId: text('block_id'),
     /**
      * Hypothes.is-style selector. `quote` plus `prefix`/`suffix` context so the
      * anchor can be re-found after later edits. Storing only start/end offsets
      * is the naive approach and breaks on the first revision.
+     *
+     * Nullable with the rest of the anchor group: a publication note is not
+     * anchored to anything.
      */
-    anchor: text('anchor').notNull(),
+    anchor: text('anchor'),
     body: text('body').notNull(),
     kind: text('kind', { enum: ANNOTATION_KINDS }).notNull().default('comment'),
     parentId: text('parent_id'),

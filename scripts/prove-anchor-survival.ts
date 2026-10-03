@@ -34,15 +34,20 @@ const before = parseBody(current.body);
    prove anything. Falling back to "any annotation" used to silently pick a
    callout, leave the text untouched, and then report the resulting "exact"
    resolve as a failure of the anchoring system rather than of the fixture. */
-const paragraphs = all.filter((a) => before.find((b) => b.id === a.blockId)?.type === 'paragraph');
+/* This script proves an *anchor* survives an edit, so an unanchored note is not
+   a valid subject. Publication-scoped notes have no anchor by design and are
+   excluded here rather than crashing the run. */
+const paragraphs = all.filter(
+  (a) => a.anchor !== null && before.find((b) => b.id === a.blockId)?.type === 'paragraph',
+);
 if (paragraphs.length === 0) {
-  console.log('SKIPPED — this post has no note on a paragraph block.');
+  console.log('SKIPPED — this post has no anchored note on a paragraph block.');
   console.log('Leave a margin note on a paragraph, then run this again.');
   process.exit(1);
 }
 
 const target = paragraphs.find((a) => a.body.includes('pod LRU')) ?? paragraphs[0]!;
-const anchor = JSON.parse(target.anchor) as Anchor;
+const anchor = JSON.parse(target.anchor!) as Anchor;
 const block = before.find((b) => b.id === target.blockId);
 if (!block) throw new Error('annotated block missing from current version');
 

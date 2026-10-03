@@ -20,7 +20,8 @@
     "perf:budget": "tsx scripts/perf-budget.ts",
     "test:smoke": "node scripts/smoke.mjs",
     "test:anchors": "tsx scripts/test-anchors.ts",
-    "test:anchor-survival": "tsx scripts/prove-anchor-survival.ts"
+    "test:anchor-survival": "tsx scripts/prove-anchor-survival.ts",
+    "test:annotations": "tsx scripts/check-annotation-invariants.ts && tsx scripts/check-publication-notes.ts"
   },
   "dependencies": {
     "@astrojs/check": "^0.5.10",
