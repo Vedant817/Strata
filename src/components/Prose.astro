@@ -312,7 +312,15 @@ const segHtml = (segments: Array<{ type: string; html?: string; text: string }>)
 
             {block.type === 'figure' && (
               <figure>
-                <img src={block.src} alt={block.alt} loading="lazy" decoding="async" />
+                <img
+                  src={block.src}
+                  alt={block.alt}
+                  width="1600"
+                  height="900"
+                  class="h-auto w-full"
+                  loading="lazy"
+                  decoding="async"
+                />
                 {block.caption && <figcaption class="meta mt-2">{block.caption}</figcaption>}
               </figure>
             )}

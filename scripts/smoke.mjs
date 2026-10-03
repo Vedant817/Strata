@@ -125,8 +125,64 @@ async function main() {
     }
   }
 
+  const stubFails = [
+    [lighthouseGate('<img src="x.jpg">').length > 0, 'unsized image is a fail'],
+    [lighthouseGate('<img src="x.jpg" width="1600" height="900">').length === 0, 'sized image is a pass'],
+    [lighthouseGate('<script src="https://evil.example/x.js"></script>').length > 0, 'third-party script is a fail'],
+    [lighthouseGate('<script>void 0</script>').length === 0, 'inline script is a pass'],
+  ];
+  for (const [ok, label] of stubFails) {
+    if (ok) console.log(`  ok    lighthouse-gate  ${label}`);
+    else {
+      failures++;
+      console.error(`  FAIL  lighthouse-gate  ${label}`);
+    }
+  }
+
+  /* PLAN.md §2.5 Lighthouse gate. LCP/CLS/INP cannot be measured here without
+     Chrome. What we can assert, on the real article HTML, are the causes those
+     numbers move with: no third-party scripts, every image reserves its box,
+     fonts already swap (checked in the built CSS by perf:budget's sibling). */
+  const articlePath = '/w/cache-invalidation-is-a-distributed-problem';
+  const articleRes = await fetch(new URL(articlePath, base), { redirect: 'manual' });
+  const articleHtml = await articleRes.text();
+  const gateFails = lighthouseGate(articleHtml);
+  if (gateFails.length === 0) {
+    console.log(`  ok    lighthouse-gate  ${articlePath}`);
+  } else {
+    for (const f of gateFails) {
+      failures++;
+      console.error(`  FAIL  lighthouse-gate  ${f}`);
+    }
+  }
+
   console.log(`\n${OK.length + NOT_FOUND.length} routes, ${failures} failed`);
   process.exitCode = failures > 0 ? 1 : 0;
+}
+
+/**
+ * Structural stand-ins for LCP < 1.5s, CLS < 0.02, INP < 200ms on the article.
+ * A vendor script or an unsized image is how those numbers actually regress.
+ */
+function lighthouseGate(html) {
+  const fails = [];
+  const scripts = [...html.matchAll(/<script\b([^>]*)>/gi)].map((m) => m[1]);
+  for (const attrs of scripts) {
+    const src = attrs.match(/\bsrc=["']([^"']+)["']/i);
+    if (!src) continue;
+    const url = src[1];
+    if (/^(https?:)?\/\//i.test(url) && !/127\.0\.0\.1|localhost/.test(url)) {
+      fails.push(`external script ${url}`);
+    }
+  }
+  const imgs = [...html.matchAll(/<img\b([^>]*)>/gi)].map((m) => m[1]);
+  for (const attrs of imgs) {
+    const hasWidth = /\bwidth\s*=/.test(attrs);
+    const hasHeight = /\bheight\s*=/.test(attrs);
+    const src = (attrs.match(/\bsrc=["']([^"']+)["']/i) || [, ''])[1];
+    if (!hasWidth || !hasHeight) fails.push(`unsized image ${src || '(no src)'}`);
+  }
+  return fails;
 }
 
 try {
