@@ -87,6 +87,37 @@ function toFtsQueries(raw: string): string[] {
   return [quoted.join(' '), quoted.join(' OR ')];
 }
 
+/**
+ * Quotes from this post only. No model, no quota, no ask row.
+ *
+ * Share cards and crawlers hit this path: they must not spend a budget slot
+ * and must not inflate the writer's "questions readers asked" list.
+ */
+export async function retrievePassages(
+  postId: string,
+  question: string,
+  limit = 3,
+): Promise<AskPassage[]> {
+  const clean = question.trim().slice(0, 500);
+  const queries = clean.length >= 2 ? toFtsQueries(clean) : [];
+  if (queries.length === 0) return [];
+
+  const database = await readyDb();
+  for (const query of queries) {
+    const rows = await database.all<{ block_id: string; quote: string }>(sql`
+      SELECT block_id AS block_id,
+        snippet(block_fts, 0, '<mark>', '</mark>', '…', 32) AS quote
+      FROM block_fts
+      WHERE post_id = ${postId} AND block_fts MATCH ${query}
+      ORDER BY rank
+      LIMIT ${limit}
+    `);
+    const passages = rows.map((r) => ({ blockId: r.block_id, quote: r.quote }));
+    if (passages.length > 0) return passages;
+  }
+  return [];
+}
+
 export async function askPost(
   postId: string,
   versionId: string,
@@ -98,7 +129,6 @@ export async function askPost(
 ): Promise<AskResult> {
   const started = Date.now();
   const clean = question.trim().slice(0, 500);
-  const queries = clean.length >= 2 ? toFtsQueries(clean) : [];
 
   /* Meter before doing any work.
      The cache is consulted first so a repeat of a question already answered
@@ -125,22 +155,7 @@ export async function askPost(
     return note;
   }
 
-  let passages: AskPassage[] = [];
-  if (queries.length > 0) {
-    const database = await readyDb();
-    for (const query of queries) {
-      const rows = await database.all<{ block_id: string; quote: string }>(sql`
-        SELECT block_id AS block_id,
-          snippet(block_fts, 0, '<mark>', '</mark>', '…', 32) AS quote
-        FROM block_fts
-        WHERE post_id = ${postId} AND block_fts MATCH ${query}
-        ORDER BY rank
-        LIMIT ${limit}
-      `);
-      passages = rows.map((r) => ({ blockId: r.block_id, quote: r.quote }));
-      if (passages.length > 0) break;
-    }
-  }
+  const passages = await retrievePassages(postId, clean, limit);
 
   const latencyMs = Date.now() - started;
   const matched = passages.length > 0;

@@ -28,7 +28,8 @@
     "test:migration": "tsx scripts/check-migration-0020.ts",
     "test:autopsy": "tsx scripts/check-autopsy.ts",
     "test:audience": "tsx scripts/check-audience.ts",
-    "test:recommend": "tsx scripts/check-recommend.ts"
+    "test:recommend": "tsx scripts/check-recommend.ts",
+    "test:citation": "tsx scripts/check-citation-card.ts"
   },
   "dependencies": {
     "@astrojs/check": "^0.5.10",

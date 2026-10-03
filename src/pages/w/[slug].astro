@@ -20,6 +20,7 @@ import { isSaved, memoryKeyFor } from '../../lib/repo/reader';
 import { getMyHighlights, getPostHighlights } from '../../lib/repo/highlights';
 import { myReadingLists } from '../../lib/repo/taxonomy';
 import { askPost } from '../../lib/repo/ask';
+import { citationOgPath, citationSharePath, stripAskMarkup } from '../../lib/citation-card';
 import { stressTest } from '../../lib/repo/stress';
 import { getNeighbourhood } from '../../lib/repo/taxonomy';
 import Neighbourhood from '../../components/Neighbourhood.astro';
@@ -259,6 +260,22 @@ function hostOf(url: string): string {
 const title = isViewingOld ? `${post.title} (revision ${view.current.versionNumber})` : post.title;
 const description = post.seoDescription || stripInline(post.dek);
 
+/** An answered Ask is its own share object. The unfurl uses the citation card
+ *  (quotes from this post), not the living-diff card, so a pasted question
+ *  looks like research rather than a changelog. Rate-limited responses are
+ *  not answers and must not become cards. */
+const askShareable = Boolean(askAsked && askResult && !askResult.error);
+const shareTitle = askShareable ? `“${askQuery}” — ${post.title}` : title;
+const shareDescription = askShareable
+  ? askResult!.matched
+    ? stripAskMarkup(askResult!.answer || askResult!.passages[0]?.quote || description).slice(0, 240)
+    : "This isn't covered in the article."
+  : description;
+const shareImage = askShareable
+  ? citationOgPath(post.slug, askQuery)
+  : `/og/${post.slug}-diff.png`;
+const askShareHref = askShareable ? citationSharePath(post.slug, askQuery) : null;
+
 const diffByBlock = Object.fromEntries(view.diff.map((d) => [d.blockId, d.segments]));
 const changeByBlock = Object.fromEntries(view.diff.map((d) => [d.blockId, d.status]));
 
@@ -275,10 +292,32 @@ const jsonLd = [
     ...(post.topicName ? { articleSection: post.topicName } : {}),
   },
   { '@type': 'Person', name: post.authorName, url: `/a/${post.authorHandle}` },
+  ...(askShareable
+    ? [
+        {
+          '@type': 'QAPage',
+          url: new URL(askShareHref!, Astro.url).href,
+          mainEntity: {
+            '@type': 'Question',
+            name: askQuery,
+            ...(askResult!.matched
+              ? {
+                  acceptedAnswer: {
+                    '@type': 'Answer',
+                    text: stripAskMarkup(
+                      askResult!.answer || askResult!.passages.map((p) => p.quote).join('\n\n'),
+                    ),
+                  },
+                }
+              : {}),
+          },
+        },
+      ]
+    : []),
 ];
 ---
 
-<Base title={title} description={description} ogType="article" ogImage={`/og/${post.slug}-diff.png`} prefs={prefs} jsonLd={jsonLd}>
+<Base title={shareTitle} description={shareDescription} ogType="article" ogImage={shareImage} prefs={prefs} jsonLd={jsonLd}>
   <link rel="webmention" href={`/w/${post.slug}/webmention.xml`} />
   <link rel="pingback" href={`/w/${post.slug}/webmention.xml`} />
   <article data-depth-host data-depth={depth} data-post-id={post.id} data-version={view.current.versionNumber}>
@@ -808,7 +847,7 @@ const jsonLd = [
 
           {askAsked && (
             <div class="mt-5 max-w-xl border border-rule bg-surface p-4">
-              <p class="meta">You asked</p>
+              <p class="meta">{askResult!.matched ? 'Citation' : 'You asked'}</p>
               <p class="mt-1 text-[0.9375rem] font-medium">“{askResult!.question}”</p>
               {askResult!.error ? (
                 /* Never dress a rate limit up as a gap in the article. Telling a
@@ -853,6 +892,13 @@ const jsonLd = [
                   This isn't covered in the article — not yet, anyway. The
                   question has been logged against the post, which is how the
                   writer learns what to write next.
+                </p>
+              )}
+              {askShareHref && (
+                <p class="meta mt-4">
+                  <a href={askShareHref} class="no-underline hover:text-ink">
+                    Share this citation →
+                  </a>
                 </p>
               )}
             </div>

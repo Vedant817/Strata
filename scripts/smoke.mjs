@@ -35,6 +35,8 @@ const OK = [
   '/studio',
   '/og/cache-invalidation-is-a-distributed-problem.png',
   '/og/cache-invalidation-is-a-distributed-problem-diff.png',
+  '/og/the-p99-is-a-lie-you-tell-yourself-ask.png?q=Why+is+summing+p99s+a+mistake',
+  '/w/the-p99-is-a-lie-you-tell-yourself?ask=Why+is+summing+p99s+a+mistake',
   '/rss.xml',
   '/digest.xml',
   '/robots.txt',
