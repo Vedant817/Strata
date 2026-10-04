@@ -26,57 +26,84 @@ const groups = [
     <div class="max-w-2xl">
       <h1 class="text-3xl">Writing</h1>
       <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">
-        {plural(posts.length, 'post')}, grouped by how finished they are rather than by date. Grouping
-        by lifecycle is the point: on most publications everything is presented as equally settled, and
-        the reader has no way to know how much weight a claim has earned.
+        {
+          posts.length === 0
+            ? 'Nothing is published here yet.'
+            : `${plural(posts.length, 'post')}, grouped by how finished they are rather than by date.`
+        } Grouping by lifecycle is the point: on most publications everything is
+        presented as equally settled, and the reader has no way to know how much
+        weight a claim has earned.
       </p>
     </div>
   </header>
 
-  <div class="shell py-12">
-    <nav aria-label="Jump to a group" class="mb-10 flex flex-wrap gap-x-5 gap-y-2 border-b border-rule pb-4">
-      {
-        groups
-          .filter((g) => posts.some((p) => p.status === g.key))
-          .map((g) => (
-            <a href={`#${g.key}`} class="meta no-underline transition-colors hover:text-ink">
-              {g.label}
+  {
+    /* An empty canon used to render a heading, an empty jump-nav and nothing
+       else, which reads as a broken page rather than an empty one. Every other
+       list surface in the build says something when it has nothing; this one
+       did not, and it is the page that explains how finished things are. */
+    posts.length === 0 ? (
+      <div class="shell py-16">
+        <div class="max-w-xl border border-rule p-6">
+          <p class="text-[1.0625rem] leading-relaxed">
+            There is no canon to group yet, so there are no seedlings, budding
+            posts or evergreen ones to sort between.
+          </p>
+          <p class="mt-3 text-[0.9375rem] leading-relaxed text-ink-2">
+            A publication that has written nothing should say so plainly rather
+            than show three empty headings.{' '}
+            <a href="/about" class="text-ink no-underline hover:text-accent">
+              How this works →
             </a>
-          ))
-      }
-    </nav>
+          </p>
+        </div>
+      </div>
+    ) : (
+      <div class="shell py-12">
+        <nav
+          aria-label="Jump to a group"
+          class="mb-10 flex flex-wrap gap-x-5 gap-y-2 border-b border-rule pb-4"
+        >
+          {groups
+            .filter((g) => posts.some((p) => p.status === g.key))
+            .map((g) => (
+              <a href={`#${g.key}`} class="meta no-underline transition-colors hover:text-ink">
+                {g.label}
+              </a>
+            ))}
+        </nav>
 
-    {
-      groups.map((group) => {
-        const items = posts.filter((p) => p.status === group.key);
-        if (items.length === 0) return null;
-        return (
-          <section id={group.key} class="mb-14 scroll-mt-24 last:mb-0">
-            <div class="flex flex-wrap items-baseline justify-between gap-3 border-b border-rule pb-3">
-              <h2 class="text-xl">{group.label}</h2>
-              <p class="meta">{plural(items.length, 'post')}</p>
-            </div>
-            <p class="mt-2 max-w-xl text-[0.9375rem] text-ink-2">{group.blurb}</p>
-            <div class="mt-5">
-              {items.map((p) => (
-                <PostRow
-                  slug={p.slug}
-                  title={p.title}
-                  dek={p.dek}
-                  status={p.status}
-                  publishedAt={p.publishedAt}
-                  updatedAt={p.updatedAt}
-                  readingMinutes={p.readingMinutes}
-                  versionCount={p.versionCount}
-                  annotationTotal={p.annotationTotal}
-                  authorName={p.authorName}
-                  topicName={p.topicName}
-                />
-              ))}
-            </div>
-          </section>
-        );
-      })
-    }
-  </div>
+        {groups.map((group) => {
+          const items = posts.filter((p) => p.status === group.key);
+          if (items.length === 0) return null;
+          return (
+            <section id={group.key} class="mb-14 scroll-mt-24 last:mb-0">
+              <div class="flex flex-wrap items-baseline justify-between gap-3 border-b border-rule pb-3">
+                <h2 class="text-xl">{group.label}</h2>
+                <p class="meta">{plural(items.length, 'post')}</p>
+              </div>
+              <p class="mt-2 max-w-xl text-[0.9375rem] text-ink-2">{group.blurb}</p>
+              <div class="mt-5">
+                {items.map((p) => (
+                  <PostRow
+                    slug={p.slug}
+                    title={p.title}
+                    dek={p.dek}
+                    status={p.status}
+                    publishedAt={p.publishedAt}
+                    updatedAt={p.updatedAt}
+                    readingMinutes={p.readingMinutes}
+                    versionCount={p.versionCount}
+                    annotationTotal={p.annotationTotal}
+                    authorName={p.authorName}
+                    topicName={p.topicName}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    )
+  }
 </Base>

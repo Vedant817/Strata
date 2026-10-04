@@ -129,6 +129,10 @@ export async function applyNoteAction(
         authorId: identity.userId,
       });
       if (!result.ok) return { ok: false, message: result.error };
+      /* A repeat submission is one reply the reader already made. The row is
+         stored once, and telling the parent author about it twice would put two
+         identical entries in their inbox for something they did once. */
+      if (result.duplicate) return { ok: true };
       // The parent note's author is the one person who cares about this.
       const parent = await getAnnotation(input.parentId);
       if (parent) {

@@ -10,7 +10,7 @@
  *     belongs to — it never silently re-attaches to different prose.
  */
 
-import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, or, sql } from 'drizzle-orm';
 import { readyDb } from '../db';
 import { annotations, annotationReactions, annotationReports, posts, users } from '../db/schema';
 import { nanoid } from '../ids';
@@ -431,6 +431,88 @@ export interface CreateAnnotationInput {
   isPrivate?: boolean;
 }
 
+/**
+ * How long an identical submission counts as the same submission.
+ *
+ * Ten seconds is long enough to cover the ways one submission becomes two — a
+ * double-click, a double-tap on a phone, a reader who did not see the redirect
+ * and pressed the button again — and short enough that genuinely wanting to say
+ * the same thing twice in a row still works. It is a heuristic about human
+ * clicking speed, not a rate limit: nobody types a considered note and submits it
+ * again inside ten seconds on purpose.
+ */
+const REPEAT_WINDOW_MS = 10_000;
+
+/**
+ * Insert a note, collapsing an accidental repeat into the one the reader meant.
+ *
+ * The problem this solves is not hypothetical and is not a security concern: it
+ * is the ordinary behaviour of a person who clicks twice. Two identical replies
+ * are stored, both render, and the reader is left looking at a duplicate of
+ * their own words in someone else's margin with no obvious way to remove it. A
+ * note is a public artifact pinned to a sentence, so a duplicate is visible and
+ * lasting — worse than a double charge on a card, and much more embarrassing.
+ *
+ * Why this cannot live in the browser: the product's whole reading and writing
+ * surface is ordinary form posts so it works with JavaScript off (§1.3), and a
+ * `disabled` attribute on the button protects only the reader whose browser runs
+ * the script. A server that cannot tell a repeated submission from two
+ * deliberate ones will happily store both.
+ *
+ * The rule is deliberately narrow. Same author, same target, same words, seconds
+ * apart. Anything else is two submissions, including the same words an hour later
+ * or the same words under a different sentence.
+ *
+ * Concurrency: two simultaneous requests both insert, then both look, and both
+ * keep the earliest row and delete the rest. That converges whichever order they
+ * interleave in — the last one to finish sees the full set and removes the
+ * extras, and a request whose own row was removed reports `duplicate` so the
+ * caller can skip notifying the parent author twice.
+ */
+async function insertNoteOnce(
+  database: Awaited<ReturnType<typeof readyDb>>,
+  row: typeof annotations.$inferInsert,
+): Promise<{ row: typeof annotations.$inferInsert; duplicate: boolean }> {
+  const createdAt = row.createdAt ?? Date.now();
+  const withStamp = { ...row, createdAt };
+
+  await database.insert(annotations).values(withStamp);
+
+  const author = withStamp.authorId
+    ? eq(annotations.authorId, withStamp.authorId)
+    : eq(annotations.anonId, withStamp.anonId ?? '');
+  const target = withStamp.parentId
+    ? eq(annotations.parentId, withStamp.parentId)
+    : withStamp.blockId
+      ? eq(annotations.blockId, withStamp.blockId)
+      : eq(annotations.postId, withStamp.postId ?? '');
+
+  const near = await database
+    .select({ id: annotations.id })
+    .from(annotations)
+    .where(
+      and(
+        author,
+        target,
+        eq(annotations.body, withStamp.body),
+        gte(annotations.createdAt, createdAt - REPEAT_WINDOW_MS),
+      ),
+    )
+    // Earliest wins, with the id as a tiebreak so two rows written in the same
+    // millisecond still agree on which one survives.
+    .orderBy(asc(annotations.createdAt), asc(annotations.id));
+
+  const keeper = near[0];
+  if (keeper && near.length > 1) {
+    await database
+      .delete(annotations)
+      .where(inArray(annotations.id, near.slice(1).map((r) => r.id)));
+  }
+
+  const duplicate = Boolean(keeper) && keeper!.id !== withStamp.id;
+  return { row: duplicate ? { ...withStamp, id: keeper!.id } : withStamp, duplicate };
+}
+
 /** A note about the publication, rather than an article. No anchor, because
  *  there is no sentence for it to argue with. */
 export interface CreatePublicationNoteInput {
@@ -442,7 +524,9 @@ export interface CreatePublicationNoteInput {
   parentId?: string | null;
 }
 
-export async function createAnnotation(input: CreateAnnotationInput): Promise<Annotation> {
+export async function createAnnotation(
+  input: CreateAnnotationInput,
+): Promise<{ row: Annotation; duplicate: boolean }> {
   const database = await readyDb();
   const row: typeof annotations.$inferInsert = {
     id: nanoid(),
@@ -459,13 +543,13 @@ export async function createAnnotation(input: CreateAnnotationInput): Promise<An
     isPrivate: input.isPrivate ?? false,
     createdAt: Date.now(),
   };
-  await database.insert(annotations).values(row);
-  return row as Annotation;
+  const { row: kept, duplicate } = await insertNoteOnce(database, row);
+  return { row: kept as Annotation, duplicate };
 }
 
 export async function createPublicationNote(
   input: CreatePublicationNoteInput,
-): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; id: string; duplicate: boolean } | { ok: false; error: string }> {
   const body = input.body.trim();
   if (!body) return { ok: false, error: 'Say something first.' };
   const database = await readyDb();
@@ -486,7 +570,7 @@ export async function createPublicationNote(
   }
 
   const id = nanoid();
-  await database.insert(annotations).values({
+  const { row, duplicate } = await insertNoteOnce(database, {
     id,
     postId: null,
     versionId: null,
@@ -504,7 +588,7 @@ export async function createPublicationNote(
     isPrivate: false,
     createdAt: Date.now(),
   });
-  return { ok: true, id };
+  return { ok: true, id: row.id ?? id, duplicate };
 }
 
 export async function editAnnotation(id: string, body: string, authorId: string | null, anonId: string) {
@@ -567,7 +651,7 @@ export async function replyToAnnotation(input: {
   body: string;
   anonId: string;
   authorId: string | null;
-}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+}): Promise<{ ok: true; id: string; duplicate: boolean } | { ok: false; error: string }> {
   const parent = await getAnnotation(input.parentId);
   if (!parent || parent.status !== 'visible') {
     return { ok: false, error: 'The note you replied to is gone.' };
@@ -583,7 +667,9 @@ export async function replyToAnnotation(input: {
       authorId: input.authorId,
       parentId: parent.id,
     });
-    return created.ok ? { ok: true, id: created.id } : { ok: false, error: created.error };
+    return created.ok
+      ? { ok: true, id: created.id, duplicate: created.duplicate }
+      : { ok: false, error: created.error };
   }
   const anchor = parent.anchor ? safeAnchor(parent.anchor) : null;
   if (!anchor) {
@@ -600,7 +686,7 @@ export async function replyToAnnotation(input: {
     authorId: input.authorId,
     parentId: input.parentId,
   });
-  return { ok: true, id: created.id };
+  return { ok: true, id: created.row.id, duplicate: created.duplicate };
 }
 
 /** A stable key for whoever is reacting: the claimed account if there is one,

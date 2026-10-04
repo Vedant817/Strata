@@ -142,7 +142,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   await notifyMentions({
     body,
     postId,
-    annotationId: created.id,
+    annotationId: created.row.id,
     fromUserId: identity.userId,
     fromAnonKey: identity.anonId,
     fromName: guestName || 'someone',
@@ -150,8 +150,11 @@ export const POST: APIRoute = async ({ request, cookies }) => {
 
   return new Response(
     JSON.stringify({
-      id: created.id,
-      createdAt: created.createdAt,
+      /* The keeper's id either way: a reader who double-clicks must not end up
+         holding an id for a row that was folded into the first submission. */
+      id: created.row.id,
+      createdAt: created.row.createdAt,
+      duplicate: created.duplicate,
       anchor: { start: resolved.start, end: resolved.end },
     }),
     { status: 201, headers: { 'content-type': 'application/json' } },

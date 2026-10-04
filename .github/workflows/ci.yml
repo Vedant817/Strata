@@ -94,6 +94,12 @@ jobs:
       - name: Hostile use
         run: npm run test:hostile
 
+      # What a person does twice, not what an attacker does. Found the duplicate
+      # reply: a double-clicked "Post reply" stored two identical public notes
+      # pinned to someone else's sentence, with no way for the reader to undo it.
+      - name: Accidental repeats
+        run: npm run test:repeat
+
       # Whether a hostile query string becomes markup. Separate from the hostile
       # pass because the answer is not in the bytes: these payloads are inert by
       # escaping, so the only way to tell an inert reflection from a live one is to
