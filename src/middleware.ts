@@ -95,22 +95,35 @@ export const onRequest = defineMiddleware(async (context, next) => {
      500 on the redirect itself: the author claims a handle, the confirmation
      link 500s, and nothing says why.
 
-     So the response is rebuilt with fresh headers rather than mutated in place.
-     One Response allocation per request is not worth optimising against a 500,
-     and the body stream is passed straight through, so nothing is buffered. */
-  const headers = new Headers(response.headers);
-  headers.set('cache-control', header);
-  headers.append('vary', 'Accept-Encoding');
+     The fix is to rebuild *only* in that case. The first version of this rebuilt
+     unconditionally, which is the obvious way to write it and quietly broke
+     every endpoint route: `/robots.txt`, `/rss.xml` and `/digest.xml` all began
+     ending their responses prematurely, because the node adapter had already
+     taken a reference to the original body stream and a wrapper Response with
+     the same stream no longer lined up with it. The HTML pages happened to
+     survive, which is why it looked like an XML problem rather than a middleware
+     problem. Mutation is attempted in place first, and only an immutable
+     response pays for a copy. */
+  let outbound = response;
+  try {
+    response.headers.set('cache-control', header);
+    response.headers.append('vary', 'Accept-Encoding');
+  } catch {
+    const headers = new Headers(response.headers);
+    headers.set('cache-control', header);
+    headers.append('vary', 'Accept-Encoding');
 
-  // These statuses must not carry a body, and constructing one with a body throws.
-  const bodyless = response.status === 204 || response.status === 205 || response.status === 304;
-  const rebuilt = bodyless
-    ? new Response(null, { status: response.status, statusText: response.statusText, headers })
-    : new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers,
-      });
+    // These statuses must not carry a body, and constructing one with a body throws.
+    const bodyless =
+      response.status === 204 || response.status === 205 || response.status === 304;
+    outbound = bodyless
+      ? new Response(null, { status: response.status, statusText: response.statusText, headers })
+      : new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
+  }
 
   /* Compress, or do not claim to. `Vary: Accept-Encoding` above is a promise
      that the bytes change with the encoding, and on the standalone Node server
@@ -121,7 +134,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
      Vercel's edge compresses before this sees the response, and compressing
      there too would spend CPU to save nothing, so it is skipped when the
      platform is already doing it. */
-  return compressResponse(rebuilt, context.request.headers.get('accept-encoding'));
+  return compressResponse(outbound, context.request.headers.get('accept-encoding'));
 });
 
 function headerFor(pathname: string): string {

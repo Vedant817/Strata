@@ -72,12 +72,46 @@ export async function compressResponse(
   const lengthHeader = Number(response.headers.get('content-length') ?? '0');
   if (lengthHeader > 0 && lengthHeader < MIN_BYTES) return response;
 
-  const body = await response.arrayBuffer();
-  if (body.byteLength < MIN_BYTES) return response;
-
-  const raw = Buffer.from(body);
   const useBrotli = wantsBrotli(acceptEncoding);
   if (!useBrotli && !wantsGzip(acceptEncoding)) return response;
+
+  /* Reading the body *consumes* it. Every path from here on must therefore
+     return a Response built from the bytes in hand — never the original, whose
+     stream has already been drained.
+
+     This was the original bug, and it was a quiet one: the "too small to be
+     worth compressing" branch returned the original response, so every response
+     under a kilobyte arrived truncated. /robots.txt, /digest.xml and /rss.xml
+     all ended their connections early; the article pages were fine, because they
+     are large enough to be compressed and so took the rebuilding path. It looks
+     exactly like "the XML routes are broken" and is actually "small responses
+     are dropped". */
+  const body = await response.arrayBuffer();
+  const raw = Buffer.from(body);
+  const headers = new Headers(response.headers);
+
+  /* 204 and 304 must not carry a body, and constructing a Response that claims
+     one is rejected outright. `Content-Length` on either is a lie as well. */
+  const bodyless = response.status === 204 || response.status === 304;
+  const rebuild = (bytes: Buffer | null, encoded: boolean): Response => {
+    if (bodyless) {
+      headers.delete('content-length');
+      headers.delete('content-encoding');
+      return new Response(null, { status: response.status, headers });
+    }
+    if (encoded && bytes) headers.set('content-length', String(bytes.length));
+    // Sent uncompressed, so any inherited Content-Length may now be wrong
+    // (the original may have declared one for a different representation).
+    else headers.delete('content-length');
+    return new Response(bytes, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  };
+
+  // Nothing gained, nothing lost: hand back exactly what we were given.
+  if (raw.byteLength < MIN_BYTES) return rebuild(raw, false);
 
   const compressed = useBrotli
     ? await brotliAsync(raw, {
@@ -88,24 +122,12 @@ export async function compressResponse(
   // If it did not get smaller, send the original. Compressing already-small or
   // incompressible payloads and shipping a larger body is a self-inflicted
   // regression.
-if (compressed.length >= raw.length) return response;
+  if (compressed.length >= raw.length) return rebuild(raw, false);
 
-  const headers = new Headers(response.headers);
   headers.set('content-encoding', useBrotli ? 'br' : 'gzip');
-  headers.set('content-length', String(compressed.length));
   headers.set('vary', mergeVary(headers.get('vary'), 'Accept-Encoding'));
 
-  // 204/304 must not carry a body, and Content-Length would be a lie on them.
-  if (response.status === 204 || response.status === 304) {
-    headers.delete('content-length');
-    return new Response(null, { status: response.status, headers });
-  }
-
-  return new Response(compressed, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  return rebuild(compressed, true);
 }
 
 /** Append a token without duplicating one the route already set. */

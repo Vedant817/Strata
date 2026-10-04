@@ -20,13 +20,13 @@ import { compressResponse } from '../src/lib/compress.ts';
 let failures = 0;
 let assertions = 0;
 
-function check(condition: unknown, label: string) {
+function check(condition: boolean, label: string, detail = '') {
   assertions++;
   if (condition) {
     console.log(`  ok    ${label}`);
   } else {
     failures++;
-    console.error(`  FAIL  ${label}`);
+    console.error(`  FAIL  ${label}${detail ? `\n          ${detail}` : ''}`);
   }
 }
 
@@ -115,6 +115,47 @@ async function run() {
     check(
       res.headers.get('content-encoding') === null,
       'an incompressible body is sent as-is rather than grown',
+    );
+  }
+
+  {
+    // The bug this file exists for. Reading the body consumes it, so any branch
+    // that decides *not* to compress after that point has to hand back the bytes
+    // it read rather than the drained Response. Returning the original truncated
+    // every response under a kilobyte: /robots.txt, /rss.xml and /digest.xml all
+    // ended their connections early, while article pages were fine because they
+    // are large enough to be compressed. It reads as "the XML routes are broken"
+    // and is actually "small responses are dropped".
+    const tiny = 'User-agent: *\nAllow: /\n';
+    const res = await compressResponse(body(tiny), 'gzip, br');
+    // Read once: a Response body can only be consumed once, so a second read in
+    // the failure detail would throw rather than explain.
+    const gotTiny = await decode(res);
+    check(gotTiny === tiny, 'a body under 1KB arrives complete', JSON.stringify(gotTiny));
+    check(res.headers.get('content-encoding') === null, 'a body under 1KB is not marked encoded');
+  }
+  {
+    // Same class of failure on the other branch: incompressible, so not encoded,
+    // but the body was still read to find that out.
+    const noise = randomBytes(4096);
+    const res = await compressResponse(
+      new Response(noise, { headers: { 'content-type': 'text/html' } }),
+      'br, gzip',
+    );
+    const got = Buffer.from(await res.arrayBuffer());
+    check(
+      Buffer.compare(got, noise) === 0,
+      'an incompressible body arrives byte-for-byte',
+      `${got.byteLength} of ${noise.length} bytes`,
+    );
+  }
+  {
+    // And a compressed one, which is the path everyone assumed was the only one.
+    const res = await compressResponse(body(LONG), 'br');
+    check((await decode(res)) === LONG, 'a compressed body round-trips');
+    check(
+      Number(res.headers.get('content-length')) > 0,
+      'a compressed body advertises its length honestly',
     );
   }
 

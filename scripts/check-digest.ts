@@ -29,6 +29,41 @@ const HOST = '127.0.0.1';
 const base = `http://${HOST}:${PORT}`;
 const RUN = Date.now().toString(36).slice(-5);
 
+/**
+ * A throwaway database, for the same reason as check-import-api.ts: this script
+ * writes read receipts and follows, and a developer's own database should not
+ * accumulate a browser's reading history from a test. The server subprocess is
+ * the only thing that touches it, and it inherits this from the environment
+ * before it boots.
+ *
+ * The database is seeded by the server on first query, so there is real content
+ * to rank — which is the point: an empty canon cannot show that the ranking does
+ * anything.
+ */
+const TEST_DB = path.join(os.tmpdir(), `strata-digest-${RUN}.db`);
+process.env.DATABASE_URL = `file:${TEST_DB}`;
+
+/**
+ * Seeded, because an empty canon cannot demonstrate that ranking does anything:
+ * with nothing published there is nothing to rank, and every assertion about
+ * personalisation would pass vacuously. Seeded into the throwaway database, so
+ * the developer's own is untouched.
+ *
+ * Spawned rather than imported because `seed.ts` ends in `process.exit(0)` —
+ * which is right for a CLI and would take this check down with it.
+ */
+await new Promise<void>((resolve, reject) => {
+  const seed = spawn(
+    process.execPath,
+    [path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs'), path.join(ROOT, 'scripts', 'seed.ts')],
+    { cwd: ROOT, env: { ...process.env }, stdio: 'ignore', windowsHide: true },
+  );
+  seed.on('exit', (code) =>
+    code === 0 ? resolve() : reject(new Error(`seed exited with ${code}`)),
+  );
+  seed.on('error', reject);
+});
+
 let failures = 0;
 let assertions = 0;
 
@@ -218,9 +253,19 @@ async function main() {
   const warmState = JSON.parse(warm.result.value);
 
   check('a reader with history gets the page', /Your week/.test(warmState.body), warmState.body.slice(0, 120));
+
+  /* The claim under test is that the list is *ranked for this reader*. The
+     fallback message ("You have finished N posts, none in a topic yet") also
+     matches /explains how the list was chosen/, so accepting either would let
+     this pass on a digest that personalised nothing. */
   check(
-    'the page explains how the list was chosen',
-    /Ranked from|You have finished/.test(warmState.body),
+    'the reader with reads gets the personalised explanation, not the fallback',
+    /Ranked from/.test(warmState.body),
+    warmState.body.slice(0, 300),
+  );
+  check(
+    'and it names the signal it used',
+    /you follow|you finished/.test(warmState.body),
     warmState.body.slice(0, 300),
   );
   check(
@@ -254,4 +299,11 @@ try {
   await main();
 } finally {
   server.kill();
+  for (const suffix of ['', '-wal', '-shm']) {
+    try {
+      fs.rmSync(TEST_DB + suffix, { force: true, maxRetries: 3 });
+    } catch {
+      /* the OS temp directory will get it */
+    }
+  }
 }

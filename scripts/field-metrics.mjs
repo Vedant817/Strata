@@ -59,27 +59,24 @@ const HOST = '127.0.0.1';
 const BUDGET = { lcpMs: 1500, cls: 0.02, inpMs: 200 };
 
 /**
- * The article misses the plan's 1500ms LCP, and the reason is worth writing down
- * rather than tuning away.
+ * The article's LCP, and why this is now the plan's figure rather than a looser
+ * one.
  *
- * Its LCP element is the first paragraph and LCP equals FCP, so nothing re-paints
- * late — no late font, no late image. The cost is laying out a 15,000-word
- * document on a CPU slowed 4x: ~1,000 CSS rules against ~2,000 elements and
- * 11,500px of prose. Measured 1.6-2.0s. The homepage, with 291 elements, measures
- * 1.07-1.25s and holds the budget with room to spare.
+ * When this script was first written the article measured 1.6-2.0s against a
+ * 1500ms budget, and the budget was raised to 2100ms with a note saying the gap
+ * was laying out 11,500px of prose on a 4x-slowed CPU. That diagnosis was right
+ * about the cause and wrong about the conclusion, because two other things were
+ * inflating the number at the same time: an uncompressed 138KB document, and an
+ * INP pass sharing a browser with the traced Lighthouse runs.
  *
- * Deleting the assertion would make CI green and lose the check; leaving it at
- * 1500 would make the build permanently red and train everyone to ignore it. So
- * the number is printed against the plan's figure on every run and fails only if
- * it gets worse than this guard.
+ * With those fixed the same page measures 1207ms — inside the plan's budget, with
+ * room. So the guard is gone rather than left in place, because a raised budget
+ * that nobody raises back is a budget nobody believes.
  *
- * The fix is to stop laying out the whole article on first paint, which is
- * `content-visibility: auto`. That was implemented, measured, and reverted: it
- * does fix the number, and it also drops off-screen prose out of the
- * accessibility tree — verified over CDP, not assumed. Not a trade this
- * publication should make silently for a third of a second.
+ * Recorded here because the tempting move when this regresses again is to bump
+ * the number. The honest response to a slow article is to find what got slower.
  */
-const ARTICLE_LCP = 2100;
+const ARTICLE_LCP = BUDGET.lcpMs;
 
 /**
  * Two classes of interaction, because they are not the same kind of thing.
@@ -90,23 +87,19 @@ const ARTICLE_LCP = 2100;
  *
  * **Preference** — the paper/ink and density toggles. These set an attribute on
  * `<html>`, and `--body-size` and `--leading` live on `:root`, so one tap
- * changes the font size of every element in a 15,000-word article and the
- * browser re-lays out all of it before it can paint the button. Measured on the
- * homepage that is 96-144ms and comfortably inside the plan's budget. Measured
- * on the article it is 256-368ms and no amount of engineering makes it
- * otherwise: the work *is* laying out the document.
+ * changes the font size of every element in a 15,000-word article and the browser
+ * re-lays out all of it before it can paint. That is real work and it is not a
+ * bug, but it also used to measure at 240-370ms — which turned out to be a
+ * measurement artefact, since the INP pass was sharing a browser with traced
+ * Lighthouse runs and inheriting its throttling. Measured in its own browser the
+ * article's toggles come out at 56ms.
  *
- * Asserting 200ms on the preference toggles would mean the gate could never be
- * green, and a gate that is always red is a gate nobody runs. So they are
- * measured and printed every run, and guarded against getting worse rather than
- * against a target they were never going to hit. Anything that starts costing
- * more than the guard fails the build.
- *
- * This is the one place in this script where a number is reported without being
- * asserted at the plan's figure, and it is deliberate and visible.
+ * So they are asserted at the plan's figure too, and reported separately because
+ * they are worth watching: they are the interaction most likely to regress as the
+ * canon grows.
  */
 const PREFERENCE_TOGGLE = ['data-theme-toggle', 'data-density-toggle'];
-const PREFERENCE_INP_MS = 500;
+const PREFERENCE_INP_MS = 200;
 
 /**
  * Best-of-N.
@@ -731,8 +724,8 @@ async function main() {
       if (!prefRow.good) failures++;
       if (measured.preference > BUDGET.inpMs) {
         console.log(
-          `    note  preference toggles exceed the plan's ${BUDGET.inpMs}ms. Reported, not asserted at that ` +
-            'figure: they restyle the whole document. See PREFERENCE_TOGGLE.',
+          `    note  preference toggles are over ${BUDGET.inpMs}ms. They restyle the whole document, so ` +
+            'this is the number to watch as the canon grows. See PREFERENCE_TOGGLE.',
         );
       }
 
@@ -754,9 +747,7 @@ async function main() {
   }
 
   console.log(
-    `PLAN.md §2.5: LCP < ${BUDGET.lcpMs}ms, CLS < ${BUDGET.cls}, INP < ${BUDGET.inpMs}ms on 4G.\n` +
-      `Two numbers are reported against a guard rather than the plan's figure, both documented above:\n` +
-      `the article's LCP (${ARTICLE_LCP}ms vs ${BUDGET.lcpMs}ms) and preference toggles (${PREFERENCE_INP_MS}ms vs ${BUDGET.inpMs}ms).\n`,
+    `PLAN.md §2.5: LCP < ${BUDGET.lcpMs}ms, CLS < ${BUDGET.cls}, INP < ${BUDGET.inpMs}ms on 4G, asserted on both pages.\n`,
   );
 
   if (failures > 0) {

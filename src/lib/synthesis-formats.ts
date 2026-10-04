@@ -1,7 +1,8 @@
 import { getLinks } from './repo/posts';
 import { readyDb } from './db/index';
-import { posts, topics } from './db/schema';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { blocks, posts, postVersions, topics } from './db/schema';
+import { countWords } from './blocks';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 
 /**
  * A published, non-archived piece. Synthesis is about what a reader can
@@ -43,7 +44,14 @@ export interface CanonPost {
   versionCount: number;
 }
 
-export type FormatId = 'digest' | 'path' | 'gaps' | 'revisions';
+export type FormatId =
+  | 'digest'
+  | 'path'
+  | 'gaps'
+  | 'revisions'
+  | 'cards'
+  | 'thread'
+  | 'shape';
 
 export interface FormatResult {
   id: FormatId;
@@ -316,13 +324,325 @@ function revisions(canon: CanonPost[]): FormatResult {
   };
 }
 
+/* ------------------------------------------------------------------- cards */
+
+interface CanonBlock {
+  postSlug: string;
+  type: string;
+  layer: string;
+  text: string;
+  wordCount: number;
+}
+
+/**
+ * The current version's blocks for every post, in document order.
+ *
+ * `currentVersionId`, not "the newest version": a draft in progress is not what
+ * the writer published, and a synthesis built from a draft would change every
+ * time they saved.
+ */
+async function loadBlocks(canon: CanonPost[]): Promise<CanonBlock[]> {
+  if (canon.length === 0) return [];
+  const database = await readyDb();
+
+  const rows = await database
+    .select({
+      postSlug: posts.slug,
+      type: blocks.type,
+      layer: blocks.layer,
+      text: blocks.text,
+      wordCount: blocks.wordCount,
+    })
+    .from(blocks)
+    .innerJoin(posts, eq(blocks.postId, posts.id))
+    .innerJoin(postVersions, eq(blocks.versionId, postVersions.id))
+    .where(
+      and(
+        inArray(posts.slug, canon.map((p) => p.slug)),
+        sql`${posts.currentVersionId} = ${postVersions.id}`,
+      ),
+    )
+    .orderBy(asc(posts.slug), asc(blocks.ordinal));
+
+  return rows.map((r) => ({
+    postSlug: r.postSlug,
+    type: r.type,
+    layer: r.layer,
+    text: r.text,
+    /* `wordCount` is written when a version is published. Anything that reached
+       the database another way — an import, a row written before the column
+       existed — carries 0, and a "where the work is" format that reports those
+       posts as empty is worse than one that counts the text it is already
+       holding. Counted from the text rather than trusted. */
+    wordCount: Number(r.wordCount) || countWords(r.text),
+  }));
+}
+
+/** Trim to a sentence or two. A card is a recall prompt, not an excerpt. */
+function firstSentences(text: string, max = 240): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max);
+  const stop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '));
+  return stop > 60 ? cut.slice(0, stop + 1) : `${cut.replace(/\s+\S*$/, '')}…`;
+}
+
+/**
+ * Flashcards, built only from sentences the writer wrote.
+ *
+ * The temptation with a "generate flashcards" feature is a model. This format
+ * refuses for the reason the module header gives: a published synthesis has to
+ * be reproducible, and a card the writer did not write is a quiz about the tool's
+ * reading of their work rather than about their work.
+ *
+ * So the sources are the block types that already *are* recall material, in the
+ * writer's own words:
+ *
+ *   - `primer` — a glossary term and the definition given for it. The best card
+ *     in any publication, and it was already written.
+ *   - `tldr` — the post's own one-paragraph answer.
+ *   - `heading` followed by prose — ask for the section, answer with its opening.
+ *   - `quote` — the pull quote, as a thing worth recalling.
+ *
+ * Ordered by post then block, so the deck is identical between runs.
+ */
+function cards(canon: CanonPost[], all: CanonBlock[]): FormatResult {
+  const lines: string[] = [];
+  const caveats: string[] = [];
+  const byPost = new Map<string, CanonBlock[]>();
+  for (const b of all) {
+    if (!byPost.has(b.postSlug)) byPost.set(b.postSlug, []);
+    byPost.get(b.postSlug)!.push(b);
+  }
+
+  const emit = (p: CanonPost, q: string, a: string, source: string) => {
+    if (!q.trim() || !a.trim()) return;
+    lines.push(`## ${q}`, '', a, '', `— [${p.title}](/w/${p.slug}) · ${source}`, '');
+  };
+
+  for (const p of canon) {
+    const post = byPost.get(p.slug) ?? [];
+    for (let i = 0; i < post.length; i++) {
+      const b = post[i]!;
+      if (b.type === 'primer') {
+        // `text` arrives as "term - context", which is what the renderer receives.
+        const [term, ...rest] = b.text.split(' - ');
+        if (term?.trim() && rest.length) {
+          emit(p, `What is ${term.trim()}?`, firstSentences(rest.join(' - ')), 'primer');
+        }
+      }
+      if (b.type === 'tldr') {
+        emit(p, `${p.title} — in one paragraph`, firstSentences(b.text, 300), 'summary');
+      }
+      if (b.type === 'heading') {
+        const next = post[i + 1];
+        if (next && (next.type === 'paragraph' || next.type === 'list')) {
+          emit(p, b.text.trim(), firstSentences(next.text), 'section');
+        }
+      }
+      if (b.type === 'quote' && b.text.trim()) {
+        emit(p, 'A line worth keeping', firstSentences(b.text, 200), 'quote');
+      }
+    }
+  }
+
+  const count = lines.filter((l) => l.startsWith('## ')).length;
+  if (count === 0) {
+    lines.push(
+      'No cards could be built from the canon.',
+      '',
+      'Cards come from primer blocks, tldr summaries, headings and pull quotes.',
+      'A post of nothing but paragraphs has nothing here worth recalling.',
+    );
+  } else {
+    const missing = canon.filter((p) => !byPost.has(p.slug)).length;
+    if (missing > 0) caveats.push(`${missing} posts had no blocks in their current version.`);
+  }
+
+  return {
+    id: 'cards',
+    label: 'Flashcards',
+    blurb: 'A recall deck from your own sentences: glossary terms, summaries, section openings.',
+    text: lines.join('\n').trim(),
+    caveats,
+  };
+}
+
+/* ------------------------------------------------------------------ thread */
+
+/**
+ * The thread: what the canon argues, in the order it argued it.
+ *
+ * Distinct from the reading path, which is the single longest chain through the
+ * link graph and so one route through the work. This is every post in publication
+ * order with what it leaned on, which makes the *sequence* legible: what came
+ * first, which piece arrived to answer an earlier one, and where the line goes
+ * quiet. The difference between a map of the roads and a walk.
+ */
+async function thread(canon: CanonPost[]): Promise<FormatResult> {
+  const bySlug = new Map(canon.map((p) => [p.slug, p]));
+  const ordered = [...canon].sort((a, b) => dateOf(a) - dateOf(b));
+  const lines: string[] = [];
+  const caveats: string[] = [];
+
+  const citations = new Map<string, string[]>();
+  for (const p of canon) {
+    const out: string[] = [];
+    for (const link of await getLinks(p.id)) {
+      if (link.direction !== 'out') continue;
+      if (link.type === 'contradicts' || link.type === 'fork_of') continue;
+      if (!bySlug.has(link.slug) || link.slug === p.slug) continue;
+      if (!out.includes(link.slug)) out.push(link.slug);
+    }
+    citations.set(p.slug, out);
+  }
+
+  let previous: number | null = null;
+  let longestGap = 0;
+  for (const p of ordered) {
+    const when = dateOf(p);
+    if (previous !== null) {
+      const gap = Math.round((when - previous) / 86_400_000);
+      if (gap > longestGap) longestGap = gap;
+    }
+    previous = when;
+
+    lines.push(`### ${new Date(when).toISOString().slice(0, 10)} — [${p.title}](/w/${p.slug})`);
+    if (p.dek) lines.push('', firstSentences(p.dek, 200));
+    const cites = citations.get(p.slug) ?? [];
+    if (cites.length === 1) {
+      lines.push('', `Building on: [${bySlug.get(cites[0]!)!.title}](/w/${cites[0]})`);
+    } else if (cites.length > 1) {
+      lines.push('', `Building on: ${cites.map((s) => `[${bySlug.get(s)!.title}](/w/${s})`).join(', ')}`);
+    } else {
+      lines.push('', 'Leans on nothing else here — an opening move.');
+    }
+    lines.push('');
+  }
+
+  const openings = canon.filter((p) => (citations.get(p.slug) ?? []).length === 0).length;
+  if (openings > 1) {
+    caveats.push(
+      `${openings} posts lean on nothing else in the canon. A thread with that many openings is a shelf, not an argument.`,
+    );
+  }
+  if (longestGap > 90) caveats.push(`Longest silence between two posts: ${longestGap} days.`);
+
+  lines.push(`${ordered.length} posts, ${openings} of them opening moves.`);
+
+  return {
+    id: 'thread',
+    label: 'Thread outline',
+    blurb: 'Every post in publication order with what it leaned on — the argument as a sequence.',
+    text: lines.join('\n').trim(),
+    caveats,
+  };
+}
+
+/* ------------------------------------------------------------------- shape */
+
+/** A text histogram. Plain text on purpose: this format gets pasted somewhere. */
+function bar(value: number, max: number, width = 28): string {
+  if (max <= 0 || value <= 0) return '·'.repeat(width);
+  const filled = Math.max(1, Math.min(width, Math.round((value / max) * width)));
+  return '█'.repeat(filled) + '·'.repeat(width - filled);
+}
+
+/**
+ * Where the work actually is.
+ *
+ * The other formats list things. This one is a picture: words under each topic,
+ * how much of it sits above or below the fold at Read depth, and how deeply the
+ * canon has been revised. A writer with 40,000 words and 3% revised learns
+ * something from that which no list of titles tells them.
+ *
+ * Bars are proportional to the largest row, so they compare with each other
+ * rather than against an arbitrary scale.
+ */
+function shape(canon: CanonPost[], all: CanonBlock[]): FormatResult {
+  const lines: string[] = [];
+  const caveats: string[] = [];
+
+  const wordsByPost = new Map<string, number>();
+  const byLayer = new Map<string, number>();
+  let totalWords = 0;
+  for (const b of all) {
+    totalWords += b.wordCount;
+    wordsByPost.set(b.postSlug, (wordsByPost.get(b.postSlug) ?? 0) + b.wordCount);
+    byLayer.set(b.layer, (byLayer.get(b.layer) ?? 0) + b.wordCount);
+  }
+
+  const byTopic = new Map<string, { words: number; posts: number }>();
+  for (const p of canon) {
+    const key = p.topicName ?? 'Unfiled';
+    const row = byTopic.get(key) ?? { words: 0, posts: 0 };
+    row.words += wordsByPost.get(p.slug) ?? 0;
+    row.posts += 1;
+    byTopic.set(key, row);
+  }
+
+  const topicRows = [...byTopic.entries()].sort((a, b) => b[1].words - a[1].words);
+  const maxTopic = topicRows[0]?.[1].words ?? 0;
+
+  lines.push('# Effort by topic', '');
+  for (const [name, row] of topicRows) {
+    lines.push(`${bar(row.words, maxTopic)} ${row.words.toLocaleString('en-GB')}w  ${name} (${row.posts})`);
+  }
+  lines.push('');
+
+  lines.push('# Depth layers', '');
+  const layerOrder = ['core', 'understand', 'master'];
+  const layerNames: Record<string, string> = {
+    core: 'core      (always shown)',
+    understand: 'understand (skim depth)',
+    master: 'master    (Read depth)',
+  };
+  const maxLayer = Math.max(...layerOrder.map((l) => byLayer.get(l) ?? 0), 1);
+  for (const layer of layerOrder) {
+    const words = byLayer.get(layer) ?? 0;
+    const share = totalWords > 0 ? Math.round((words / totalWords) * 100) : 0;
+    lines.push(`${bar(words, maxLayer)} ${String(share).padStart(3)}%  ${layerNames[layer]}`);
+  }
+  lines.push('');
+
+  lines.push('# Revision depth', '');
+  const revised = canon.filter((p) => p.versionCount > 1).length;
+  const maxVersions = Math.max(...canon.map((p) => p.versionCount), 1);
+  for (const p of [...canon].sort((a, b) => b.versionCount - a.versionCount).slice(0, 8)) {
+    lines.push(`${bar(p.versionCount, maxVersions)} v${p.versionCount}  ${p.title}`);
+  }
+  lines.push('');
+
+  const revisedPct = canon.length > 0 ? Math.round((revised / canon.length) * 100) : 0;
+  lines.push(
+    `${canon.length} posts, ${totalWords.toLocaleString('en-GB')} words, ${revised} revised (${revisedPct}%).`,
+  );
+
+  if (revised === 0 && canon.length > 0) {
+    caveats.push('Nothing has been revised. A post never corrected is a draft that got published.');
+  }
+  if (all.length === 0) caveats.push('No blocks were found, so every bar is empty.');
+
+  return {
+    id: 'shape',
+    label: 'Where the work is',
+    blurb: 'Words by topic, by depth layer, and how much of it has been corrected.',
+    text: lines.join('\n').trim(),
+    caveats,
+  };
+}
+
 export async function buildAllFormats(authorId: string): Promise<FormatResult[]> {
   const canon = await loadCanon();
+  const all = await loadBlocks(canon);
   return [
     digest(canon),
     await readingPath(canon),
     await gaps(canon, authorId),
     revisions(canon),
+    cards(canon, all),
+    await thread(canon),
+    shape(canon, all),
   ];
 }
 

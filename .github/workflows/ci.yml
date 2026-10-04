@@ -72,6 +72,13 @@ jobs:
       - name: Audience simulator
         run: npm run test:audience
 
+      # The formats added past v1: flashcards, thread outline, and the shape
+      # breakdown. Two properties matter more than the content: a synthesis is a
+      # published artefact so two runs must be byte-identical, and no card may
+      # contain a sentence the writer did not write.
+      - name: Synthesis formats
+        run: npm run test:synthesis
+
       - name: After-read recommendations
         run: npm run test:recommend
 

@@ -10,8 +10,39 @@
  */
 
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { redeemHandleClaim, requestHandleClaim, SESSION_COOKIE } from '../src/lib/repo/auth.ts';
+
+/**
+ * The import API, end to end.
+ *
+ * The parser is unit-tested against fixtures; this drives the real HTTP route so
+ * that the claims being made to a writer — dates kept, addresses kept, structure
+ * kept, hostile markup inert — are claims about the product rather than about a
+ * function.
+ *
+ * **Runs against a throwaway database.** This script imports real posts as a real
+ * author, and the obvious database is the developer's own, which then fills up
+ * with `Cache invalidation ae85m` rows that show up in their synthesis, their
+ * sitemap and their own field-metrics LCP measurements.
+ *
+ * That redirection is why the auth functions below are imported *dynamically*.
+ * ESM evaluates the whole import graph before any statement in this file runs,
+ * so a static `import '../src/lib/repo/auth.ts'` would have `db/index.ts` read
+ * DATABASE_URL before this script had set it — the claim would land in the
+ * developer's database and the server, reading a different file, would answer 401.
+ * Which is exactly what happened before this comment existed.
+ *
+ * Needs a build. The handle claim is done through the app's own functions rather
+ * than over HTTP, because the redeem token is mailed and cannot be obtained in a
+ * test; the import itself is over the network, and the 401 it gives an anonymous
+ * caller is still real.
+ */
+
+const RUN = Date.now().toString(36).slice(-5);
+const TEST_DB = path.join(os.tmpdir(), `strata-import-api-${RUN}.db`);
+process.env.DATABASE_URL = `file:${TEST_DB}`;
 
 const ROOT = process.cwd();
 const PORT = process.env.IMPORT_PORT ?? '4505';
@@ -54,11 +85,9 @@ async function waitForServer(url: string, timeoutMs = 60_000) {
   return false;
 }
 
-/* The database persists between runs, and a second import of the same slug is a
-   conflict rather than a second post. So every run tags its titles, and the
-   conflict path is asserted deliberately below instead of being tripped over by
-   accident. */
-const RUN = Date.now().toString(36).slice(-5);
+/* A second import of the same slug is a conflict rather than a second post, so
+   every run tags its titles and the conflict path is asserted deliberately below
+   instead of being tripped over by accident. */
 
 const MEDIUM = `<!DOCTYPE html><html><head>
 <meta property="og:site_name" content="Medium">
@@ -125,6 +154,11 @@ const CSV = [
 ].join('\n');
 
 async function main() {
+  /* Dynamic, so DATABASE_URL above is already set. See the file header. */
+  const { redeemHandleClaim, requestHandleClaim, SESSION_COOKIE } = await import(
+    '../src/lib/repo/auth.ts'
+  );
+
   if (!(await waitForServer(base))) {
     console.error(`server never came up:\n${boot}`);
     process.exit(1);
@@ -314,4 +348,12 @@ try {
   await main();
 } finally {
   server.kill();
+  // The throwaway database is this run's only state; leaving it would be litter.
+  for (const suffix of ['', '-wal', '-shm']) {
+    try {
+      fs.rmSync(TEST_DB + suffix, { force: true, maxRetries: 3 });
+    } catch {
+      /* the server may still be releasing it; the OS temp directory will get it */
+    }
+  }
 }

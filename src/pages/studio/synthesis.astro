@@ -55,7 +55,7 @@ const copy = new URL(Astro.url).searchParams.get('copied');
     <p class="meta"><a href="/studio" class="no-underline hover:text-ink">Studio</a> · Synthesis</p>
     <h1 class="mt-3 text-3xl">Synthesis</h1>
     <p class="mt-3 max-w-prose text-[0.9375rem] leading-relaxed text-ink-2">
-      Four views of everything published. No model runs here — each format is
+      {formats.length} views of everything published. No model runs here — each format is
       derived from data the site already holds, so the same canon always produces
       the same document. For prose, use Ask on an individual post.
     </p>
