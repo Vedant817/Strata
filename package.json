@@ -38,6 +38,7 @@
     "test:synthesis": "tsx scripts/check-synthesis-formats.ts",
     "test:loom": "tsx scripts/check-loom.ts",
     "test:hostile": "tsx scripts/check-hostile.ts",
+    "test:xss": "tsx scripts/check-xss.ts",
     "test:field": "node scripts/field-metrics.mjs",
     "test:fonts:browser": "node scripts/check-font-metrics.mjs"
   },

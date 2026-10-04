@@ -94,6 +94,14 @@ jobs:
       - name: Hostile use
         run: npm run test:hostile
 
+      # Whether a hostile query string becomes markup. Separate from the hostile
+      # pass because the answer is not in the bytes: these payloads are inert by
+      # escaping, so the only way to tell an inert reflection from a live one is to
+      # load it and see whether it ran. Real browser, real DOM, and a control case
+      # proving the probe can detect live markup when it is there.
+      - name: Reflection
+        run: npm run test:xss
+
       - name: After-read recommendations
         run: npm run test:recommend
 
