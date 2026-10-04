@@ -115,6 +115,14 @@ jobs:
       - name: Viewports
         run: npm run test:viewports
 
+      # Content the site does not control: §10.5 imports Medium, Hashnode, Google
+      # Docs and WordPress archives, so a 200-character URL, right-to-left Arabic,
+      # emoji or a bidi control in a title is Tuesday, not a contrived fixture.
+      # Found an OG image that 500'd on bidi controls, and a 14-column table that
+      # pushed the whole page to 4410px on a phone.
+      - name: Content stress
+        run: npm run test:content
+
       # Whether a hostile query string becomes markup. Separate from the hostile
       # pass because the answer is not in the bytes: these payloads are inert by
       # escaping, so the only way to tell an inert reflection from a live one is to

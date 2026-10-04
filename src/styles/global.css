@@ -369,7 +369,22 @@
 /* The article column. At narrow widths it is exactly the reading measure; from
    1200px it widens by the width of a margin rail, so notes have somewhere to
    live. The prose column inside stays pinned to `--measure` — only the
-   container grows, so line length is never sacrificed to the margin. */
+   container grows, so line length is never sacrificed to the margin.
+
+   `overflow-wrap: break-word` handles a 200-character URL from an imported
+   archive, which otherwise pushes the page wider than a phone and costs the
+   reader the left edge of every line.
+
+   It is `break-word` and **not** `anywhere`, and that is a measured decision
+   rather than a preference. `anywhere` also reduces the element's *min-content*
+   width, which is what fixes a flex item's `min-width: auto` refusal to shrink —
+   so it looked like the tidier one-word fix. It cost LCP (2059ms against a 1500ms
+   budget) and made the preference toggles restyle the document badly enough to
+   measure 424ms of INP, because the browser has to recompute intrinsic
+   contributions for the whole text column. `break-word` breaks the same token at
+   the same place; the flex item is shrunk by `min-w-0` on the element itself,
+   which is the standard remedy and costs nothing when no token is long enough to
+   need it. */
 @utility article-body {
   max-width: var(--measure);
   margin-inline: auto;

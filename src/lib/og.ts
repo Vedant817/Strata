@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { createElement, type ReactNode } from 'react';
 import satori from 'satori';
 import { Resvg } from '@resvg/resvg-js';
+import { visibleText } from './visible-text';
 
 /**
  * Share cards, rendered to PNG.
@@ -91,7 +92,23 @@ const mono = (size: number, color: string, extra: Style = {}): Style => ({
   ...extra,
 });
 
-export async function renderShareCard(card: ShareCard): Promise<Uint8Array> {
+export async function renderShareCard(input: ShareCard): Promise<Uint8Array> {
+  /* Cleaned once, here, rather than at each of the four call sites — the card is
+     the last place a title is rendered before it faces a stranger, and a renderer
+     that throws on an invisible character takes the whole preview with it.
+     Bidirectional controls are stripped because satori 500s on them, and because
+     they can make a title *display* as something other than what it says; see
+     `visible-text` for why that matters more here than anywhere else. */
+  const card: ShareCard = {
+    ...input,
+    title: visibleText(input.title, 300),
+    dek: input.dek ? visibleText(input.dek, 300) : undefined,
+    kicker: visibleText(input.kicker, 40),
+    footerLeft: visibleText(input.footerLeft, 80),
+    footerRight: visibleText(input.footerRight, 80),
+    changes: input.changes?.map((c) => ({ kind: c.kind, text: visibleText(c.text, 160) })),
+  };
+
   const citation = card.layout === 'citation';
   const hasChanges = Boolean(card.changes && card.changes.length > 0);
   const quoteCap = citation ? 2 : 3;

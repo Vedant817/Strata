@@ -13,6 +13,7 @@
  */
 
 import { z } from 'zod';
+import { visibleText } from './visible-text';
 
 export const LAYERS = ['core', 'understand', 'master'] as const;
 export type Layer = (typeof LAYERS)[number];
@@ -230,8 +231,18 @@ export function blockInlineSource(block: Block): string {
   }
 }
 
+/**
+ * Words in a piece of text.
+ *
+ * Invisible characters are stripped first, and that is not tidiness. A block
+ * containing nothing but bidi controls and zero-width spaces trimmed to a
+ * non-empty string and counted as one word, so an imported post of pure invisible
+ * content reported a reading time — and a reading time is what a reader uses to
+ * decide whether to read something. See `visible-text` for why these characters
+ * are removed from rendering at all.
+ */
 export function countWords(text: string): number {
-  const trimmed = text.trim();
+  const trimmed = visibleText(text, Number.MAX_SAFE_INTEGER);
   if (!trimmed) return 0;
   return trimmed.split(/\s+/).length;
 }

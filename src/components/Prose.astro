@@ -277,11 +277,17 @@ const segHtml = (segments: Array<{ type: string; html?: string; text: string }>)
               ) : (
                 <ul class="list-none pl-0 space-y-2">
                   {block.items.map((item) => (
+                    /* `min-w-0` on both spans is load-bearing. A flex item defaults
+                       to `min-width: auto`, which means it refuses to shrink below
+                       its own content — so one long unbroken token in a list item
+                       (a URL from an imported archive) pushed the entire page to
+                       4410px on a 375px screen, and the reader lost the left edge
+                       of every line. */
                     <li class="flex gap-3">
-                      <span aria-hidden="true" class="text-ink-3 select-none">
+                      <span aria-hidden="true" class="min-w-0 text-ink-3 select-none">
                         —
                       </span>
-                      <span set:html={renderInline(item)} />
+                      <span class="min-w-0" set:html={renderInline(item)} />
                     </li>
                   ))}
                 </ul>

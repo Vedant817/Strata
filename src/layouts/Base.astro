@@ -1,6 +1,7 @@
 ---
 import { resolvePrefs, THEME_COOKIE, DENSITY_COOKIE, ensureAnonId, type ReaderPrefs } from '../lib/prefs';
 import { safeJsonLd } from '../lib/jsonld';
+import { visibleText } from '../lib/visible-text';
 import SiteHeader from '../components/SiteHeader.astro';
 import SiteFooter from '../components/SiteFooter.astro';
 import '../styles/global.css';
@@ -36,7 +37,15 @@ const anonId = ensureAnonId(Astro.cookies);
 
 const prefs = Astro.props.prefs ?? resolvePrefs(Astro.cookies as never, anonId);
 const site = Astro.site ?? new URL('http://localhost:4321');
-const pageTitle = !title || title === 'Strata' ? 'Strata' : `${title} · Strata`;
+/* Every title that reaches the document head goes through `visibleText` first.
+   A bidi control in a title changes how the browser tab, the search result and
+   the share card all *display* it without changing a byte of it, so the tab can
+   show something other than what the page is called — and it makes the share-card
+   renderer throw, which is a 500 for a background crawler. Author-supplied or
+   imported, the head is where a spoof is most convincing. */
+const cleanTitle = visibleText(title, 300);
+const cleanDescription = visibleText(description, 320);
+const pageTitle = !cleanTitle || cleanTitle === 'Strata' ? 'Strata' : `${cleanTitle} · Strata`;
 const canonicalUrl = canonical ? new URL(canonical, site).href : Astro.url.href;
 /* `safeJsonLd`, not `JSON.stringify`: a reader-controlled Ask question reaches
    this graph, and an unescaped `</script>` inside it would close the block and
@@ -66,7 +75,7 @@ import plexSerifRegularUrl from '@fontsource/ibm-plex-serif/files/ibm-plex-serif
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="preload" href={plexSerifRegularUrl} as="font" type="font/woff2" crossorigin />
     <title>{pageTitle}</title>
-    <meta name="description" content={description} />
+    <meta name="description" content={cleanDescription} />
     {noindex && <meta name="robots" content="noindex, nofollow" />}
     <link rel="canonical" href={canonicalUrl} />
     <meta name="theme-color" content={prefs.theme === 'ink' ? '#100f0d' : '#faf9f5'} />
@@ -78,8 +87,8 @@ import plexSerifRegularUrl from '@fontsource/ibm-plex-serif/files/ibm-plex-serif
 
     <meta property="og:type" content={ogType} />
     <meta property="og:site_name" content="Strata" />
-    <meta property="og:title" content={title ?? 'Strata'} />
-    <meta property="og:description" content={description} />
+    <meta property="og:title" content={cleanTitle || 'Strata'} />
+    <meta property="og:description" content={cleanDescription} />
     <meta property="og:url" content={canonicalUrl} />
     {
       ogImage ? (
@@ -87,7 +96,7 @@ import plexSerifRegularUrl from '@fontsource/ibm-plex-serif/files/ibm-plex-serif
           <meta property="og:image" content={new URL(ogImage, site).href} />
           <meta property="og:image:width" content="1200" />
           <meta property="og:image:height" content="630" />
-          <meta property="og:image:alt" content={title ?? 'Strata'} />
+          <meta property="og:image:alt" content={cleanTitle || 'Strata'} />
           <meta name="twitter:card" content="summary_large_image" />
           <meta name="twitter:image" content={new URL(ogImage, site).href} />
         </>
@@ -95,8 +104,8 @@ import plexSerifRegularUrl from '@fontsource/ibm-plex-serif/files/ibm-plex-serif
         <meta name="twitter:card" content="summary" />
       )
     }
-    <meta name="twitter:title" content={title ?? 'Strata'} />
-    <meta name="twitter:description" content={description} />
+    <meta name="twitter:title" content={cleanTitle || 'Strata'} />
+    <meta name="twitter:description" content={cleanDescription} />
 
     <link rel="alternate" type="application/rss+xml" title="Strata — all writing" href="/rss.xml" />
     <link rel="sitemap" type="application/xml" href="/sitemap-index.xml" />
