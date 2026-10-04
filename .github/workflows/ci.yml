@@ -79,6 +79,13 @@ jobs:
       - name: Synthesis formats
         run: npm run test:synthesis
 
+      # The writer's first pass through the maintenance loop, §10.5. The assertion
+      # that matters is that the diff the writer sees is the diff the reader gets
+      # — same renderer, same props — because a guided flow that paraphrases the
+      # payoff is a sales pitch, not the loop.
+      - name: First loom
+        run: npm run test:loom
+
       - name: After-read recommendations
         run: npm run test:recommend
 

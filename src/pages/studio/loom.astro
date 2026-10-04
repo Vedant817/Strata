@@ -1,0 +1,313 @@
+---
+import Base from '../../layouts/Base.astro';
+import Prose from '../../components/Prose.astro';
+import { getIdentity } from '../../lib/repo/auth';
+import { myPostHealth } from '../../lib/repo/studio';
+import { getPostById, getRevisionView, getReadingStats, type PostWithBody } from '../../lib/repo/posts';
+import { parseBody } from '../../lib/blocks';
+import { plural, ago } from '../../lib/format';
+import { diffStats } from '../../lib/diff';
+
+/**
+ * The first loom — PLAN.md §10.5.
+ *
+ * "Take one existing post, make one revision, publish it, see the reader-facing
+ * diff. The writer must *feel* the loop before we ask them to write a new post.
+ * Then show them empathy analytics on a real seed post, so the value is concrete
+ * rather than promised."
+ *
+ * The studio's First loom checklist already tracks the first three steps, and it
+ * computes them from what actually happened rather than from a stored tick — see
+ * studio.astro. What it cannot do is the last instruction, because it is a
+ * checklist and not a place: it cannot show the writer the thing the whole
+ * product is about, which is what the reader saw after their sentence changed.
+ *
+ * So this page carries one post through the loop and ends by showing that.
+ *
+ * **Progress is the post's own version history, not a stored checklist.** The
+ * chosen post travels in `?post=`, so the page is stateless, shareable and needs
+ * no script: a writer who closes the tab mid-flow has not lost anything, and
+ * there is no table that can disagree with reality. A checklist that remembers
+ * being ticked is a checklist that lies.
+ *
+ * The diff at the end is rendered through the same `Prose` component, with the
+ * same `diffSegments` and `changeStatus` props, that `/w/{slug}` uses. Not a
+ * paraphrase of what the reader sees — the same renderer, so if it looks right
+ * here it looks right there.
+ */
+
+const identity = await getIdentity(Astro.cookies);
+
+const chosenSlug = Astro.url.searchParams.get('post') ?? '';
+
+/** The writer's own posts, unrevised first: those are the ones that need the habit. */
+const health = identity.userId ? await myPostHealth(identity.userId) : [];
+const unrevised = health.filter((p) => p.versionCount <= 1);
+const alreadyRevised = health.filter((p) => p.versionCount > 1);
+const pickable = [...unrevised, ...alreadyRevised];
+
+const entry = pickable.find((p) => p.slug === chosenSlug) ?? null;
+
+/** The post itself, and its diff against the version before it. */
+let post: PostWithBody | null = null;
+let view: Awaited<ReturnType<typeof getRevisionView>> = null;
+if (entry) {
+  post = await getPostById(entry.id);
+  if (post) view = await getRevisionView(post.id);
+}
+
+const revised = Boolean(view?.compared);
+const stats = post ? await getReadingStats(post.id) : null;
+const diffSummary = view ? diffStats(view.diff) : null;
+
+/**
+ * Where each step stands, from data.
+ *
+ * Step 3 is "published a revision", which is `view.compared` existing — the same
+ * fact the reader-facing page checks to decide whether to offer a diff. One
+ * definition, two consumers.
+ */
+const steps = [
+  {
+    n: 1,
+    title: 'Pick a post you already published',
+    done: Boolean(entry),
+    detail: entry
+      ? `Working on “${entry.title}”.`
+      : unrevised.length > 0
+        ? `${plural(unrevised.length, 'post')} of yours has never been revised. Start with one of those.`
+        : health.length > 0
+          ? 'Everything you have published already has a revision. Pick any one to see the loop again.'
+          : 'Needs a published post first — grow a fragment in the studio, import an archive, or write one.',
+  },
+  {
+    n: 2,
+    title: 'Change one sentence',
+    done: revised,
+    detail: revised
+      ? 'Done.'
+      : 'Not the whole post. One sentence you would now say differently, because something changed since you wrote it.',
+  },
+  {
+    n: 3,
+    title: 'Publish it, and say what changed',
+    done: revised,
+    detail: revised
+      ? `Published as revision ${view?.current.versionNumber}.`
+      : 'The summary is not a formality: it is the sentence a subscriber reads to decide whether to come back.',
+  },
+  {
+    n: 4,
+    title: 'See what the reader saw',
+    done: revised,
+    detail: revised
+      ? 'Below, in the same renderer the article uses.'
+      : 'This is the part that makes the habit worth having, and it cannot be faked.',
+  },
+];
+
+const doneCount = steps.filter((s) => s.done).length;
+---
+
+<Base
+  title="First loom"
+  description="Take one post through the whole loop: revise it, publish it, and see what the reader saw."
+  noindex
+>
+  <main id="main">
+    <section class="shell">
+      <div class="max-w-prose">
+        <p class="meta"><a href="/studio" class="no-underline hover:text-ink">Studio</a> · First loom</p>
+        <h1 class="mt-3 text-3xl">First loom</h1>
+
+        {
+          !identity.userId ? (
+            <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">
+              This is the writer's loop, and it belongs to a named writer.{' '}
+              <a href="/studio#loom-heading" class="text-ink no-underline hover:text-accent">
+                Claim a handle
+              </a>{' '}
+              to take it.
+            </p>
+          ) : health.length === 0 ? (
+            <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">
+              Nothing published yet, so there is nothing to revise — and revising is the whole point.{' '}
+              <a href="/write#import" class="text-ink no-underline hover:text-accent">
+                Import an archive
+              </a>{' '}
+              if you have one, or{' '}
+              <a href="/write" class="text-ink no-underline hover:text-accent">write something</a>.
+              Come back here afterwards and this will take about four minutes.
+            </p>
+          ) : (
+            <>
+              <p class="mt-4 text-[1.0625rem] leading-relaxed text-ink-2">
+                A post is not finished when it is published. It is finished when it has been
+                corrected, and the only way to find out whether that habit is worth having is
+                to do it once and look at what the reader got.
+              </p>
+
+              <p class="meta mt-4" role="status">
+                {doneCount} of {steps.length} woven
+                {doneCount === steps.length ? ' — loop closed.' : ''}
+              </p>
+
+              <ol class="mt-4 space-y-3">
+                {steps.map((s) => (
+                  <li class="flex items-start gap-3 border border-rule p-3">
+                    <span aria-hidden="true" class="mt-0.5 font-mono text-[0.875rem]">
+                      {s.done ? '✓' : '○'}
+                    </span>
+                    <div class="min-w-0">
+                      <p class="text-[0.9375rem] font-medium">
+                        <span class="text-ink-3 font-mono text-[0.8125rem]">{s.n}.</span> {s.title}
+                      </p>
+                      <p class="mt-0.5 text-[0.875rem] leading-relaxed text-ink-2">{s.detail}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+
+              {/* Step 1's action: choosing the post. A plain link, so this works
+                  with scripting off, and it carries the choice in the URL so
+                  nothing needs storing. */}
+              {!entry && (
+                <section class="mt-8 border-t border-rule pt-6">
+                  <h2 class="text-xl">Pick one</h2>
+                  {unrevised.length > 0 && (
+                    <>
+                      <p class="mt-2 text-[0.9375rem] text-ink-2">Never revised:</p>
+                      <ul class="mt-2 space-y-1">
+                        {unrevised.map((p) => (
+                          <li>
+                            <a
+                              href={`/studio/loom?post=${encodeURIComponent(p.slug)}`}
+                              class="no-underline hover:text-accent"
+                            >
+                              {p.title}
+                            </a>
+                            <span class="meta"> · v{p.versionCount}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  {alreadyRevised.length > 0 && (
+                    <>
+                      <p class="mt-4 text-[0.9375rem] text-ink-2">Already revised:</p>
+                      <ul class="mt-2 space-y-1">
+                        {alreadyRevised.map((p) => (
+                          <li>
+                            <a
+                              href={`/studio/loom?post=${encodeURIComponent(p.slug)}`}
+                              class="no-underline hover:text-accent"
+                            >
+                              {p.title}
+                            </a>
+                            <span class="meta"> · v{p.versionCount}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </section>
+              )}
+
+              {/* Steps 2 and 3: the editor already does both, so this points at
+                  it rather than rebuilding a second editor that could drift. */}
+              {entry && !revised && post && (
+                <section class="mt-8 border-t border-rule pt-6">
+                  <h2 class="text-xl">Change one sentence</h2>
+                  <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+                    Open <strong class="font-medium">{post.title}</strong> in the editor. Change
+                    one sentence, and write in the summary what changed and why — that summary is
+                    what a revision subscriber reads, and what the reader sees under the diff.
+                  </p>
+                  <p class="mt-3">
+                    <a
+                      href={`/studio/edit/${encodeURIComponent(post.slug)}?returnTo=/studio/loom?post=${encodeURIComponent(post.slug)}`}
+                      class="text-ink no-underline hover:text-accent"
+                    >
+                      Open the editor →
+                    </a>
+                  </p>
+                </section>
+              )}
+
+              {/* Step 4: the payoff. The same component, the same props, the
+                  same diff the article renders — so this is a preview of the
+                  reader's view rather than a description of it. */}
+              {entry && revised && post && view && (
+                <section class="mt-8 border-t border-rule pt-6">
+                  <h2 class="text-xl">What the reader saw</h2>
+                  <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+                    Revision {view.current.versionNumber} against {view.compared!.versionNumber},
+                    written {ago(view.current.createdAt)}.
+                  </p>
+
+                  {/* The author's own sentence about their own change, verbatim. */}
+                  {view.current.changeSummary && (
+                    <p class="mt-3 border-l-2 border-accent pl-3 text-[0.9375rem] leading-relaxed">
+                      “{view.current.changeSummary}”
+                    </p>
+                  )}
+
+                  {diffSummary && (
+                    <p class="meta mt-3">
+                      {diffSummary.modified} modified · {diffSummary.added} added ·{' '}
+                      {diffSummary.removed} removed
+                    </p>
+                  )}
+
+                  <div class="article-body mt-6">
+                    <Prose
+                      blocks={parseBody(post.version.body)}
+                      diffSegments={Object.fromEntries(view.diff.map((d) => [d.blockId, d.segments]))}
+                      changeStatus={Object.fromEntries(view.diff.map((d) => [d.blockId, d.status]))}
+                    />
+                  </div>
+
+                  <p class="mt-6 text-[0.9375rem]">
+                    <a href={`/w/${post.slug}?rev=${view.current.versionNumber}`} class="text-ink no-underline hover:text-accent">
+                      The same thing on the public page →
+                    </a>
+                  </p>
+                </section>
+              )}
+
+              {/* "So the value is concrete rather than promised." */}
+              {entry && post && stats && (
+                <section class="mt-8 border-t border-rule pt-6">
+                  <h2 class="text-xl">Who read it</h2>
+                  {stats.impressions === 0 ? (
+                    <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+                      Nobody yet — {plural(stats.impressions, 'impression')} on this post.{' '}
+                      {revised
+                        ? 'A revision is not a broadcast: it reaches the people who already read it. That is the point of the loop, and it is also why a quiet post stays quiet.'
+                        : 'Publish the revision and this fills in. The readers who come back are the ones a maintained post earns.'}
+                    </p>
+                  ) : (
+                    <>
+                      <p class="mt-2 text-[0.9375rem] leading-relaxed text-ink-2">
+                        {plural(stats.impressions, 'read')} from {plural(stats.cohort, 'reader')} since
+                        this version went live.
+                      </p>
+                      <p class="mt-3">
+                        <a
+                          href={`/studio/readers/${encodeURIComponent(post.slug)}`}
+                          class="text-ink no-underline hover:text-accent"
+                        >
+                          Per-block reach and the confusion signal →
+                        </a>
+                      </p>
+                    </>
+                  )}
+                </section>
+              )}
+            </>
+          )
+        }
+      </div>
+    </section>
+  </main>
+</Base>
