@@ -100,6 +100,13 @@ jobs:
       - name: Accidental repeats
         run: npm run test:repeat
 
+      # The privacy promise, measured. Found that "forget my reading history"
+      # deleted receipts and events while three tables still carried the browser
+      # id — including the reader's own note, which stayed visible on the article
+      # under a page saying everything had been deleted.
+      - name: Erasure
+        run: npm run test:forget
+
       # Whether a hostile query string becomes markup. Separate from the hostile
       # pass because the answer is not in the bytes: these payloads are inert by
       # escaping, so the only way to tell an inert reflection from a live one is to

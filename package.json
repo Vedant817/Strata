@@ -39,6 +39,7 @@
     "test:loom": "tsx scripts/check-loom.ts",
     "test:hostile": "tsx scripts/check-hostile.ts",
     "test:repeat": "tsx scripts/check-repeat-submissions.ts",
+    "test:forget": "tsx scripts/check-forget.ts",
     "test:xss": "tsx scripts/check-xss.ts",
     "test:field": "node scripts/field-metrics.mjs",
     "test:fonts:browser": "node scripts/check-font-metrics.mjs"

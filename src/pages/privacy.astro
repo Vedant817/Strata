@@ -59,17 +59,29 @@ const forgotten = Astro.url.searchParams.get('forgotten') === '1';
       <section id="forget" class="scroll-mt-24">
         <h2 class="text-xl">Erase everything</h2>
         <p class="mt-3 text-[1.0625rem] leading-relaxed text-ink-2">
-          You can delete every record we hold about your reading — history, receipts and events — in
-          one action. This issues a real database delete; it is not a setting that hides things from
-          you while we keep them.
+          One action, and it is a real database delete rather than a setting that hides things from
+          you while we keep them. It removes your reading history and receipts, your highlights and
+          reactions, and the link between your browser and any question you have asked.
         </p>
 
         {
           forgotten ? (
-            <p class="mt-5 border border-pine px-4 py-3 text-[0.9375rem]">
-              Done. Every reading record associated with your browser has been deleted. Your
-              preferences have been reset too, so the next page will use the defaults.
-            </p>
+            <div class="mt-5 border border-pine px-4 py-3">
+              <p class="text-[0.9375rem]">Done.</p>
+              <p class="mt-2 text-[0.9375rem] leading-relaxed">
+                Your reading history, receipts, highlights and reactions are deleted, your
+                preferences are reset to the defaults, and the questions you asked are no longer
+                linked to this browser.
+              </p>
+              <p class="mt-2 text-[0.9375rem] leading-relaxed">
+                <strong class="font-medium">Two things are deliberately still here.</strong> Your
+                notes in the margins, because they are published in a thread other readers have
+                replied to and withdrawing one is your decision to make, not ours to make for you —
+                each note has its own remove control. And the questions themselves, which stay with
+                the writer because a question nobody asked is how a writer learns what to write next;
+                what is gone is the link to you.
+              </p>
+            </div>
           ) : (
             <form method="post" action="/api/forget" class="mt-5">
               <input type="hidden" name="anon" value={anonId} />

@@ -9,7 +9,9 @@
 import { and, asc, count, desc, eq, inArray, lt, ne, sql } from 'drizzle-orm';
 import { readyDb } from '../db';
 import {
+  annotationReactions,
   annotations,
+  asks,
   blocks,
   postLinks,
   postVersions,
@@ -552,11 +554,47 @@ export async function incrementViews(postId: string) {
     .where(eq(posts.id, postId));
 }
 
-/** Forget everything we know about an anonymous reader. Exercise-able privacy. */
+/**
+ * Forget everything we know about an anonymous reader. Exercise-able privacy.
+ *
+ * The test for this function is not "does it return 200" — it is "after it runs,
+ * can any row anywhere still be traced back to this browser". An earlier version
+ * deleted read receipts and read events and nothing else, while the page it was
+ * reached from promised that *every* reading record had been deleted. Three
+ * tables still carried the anon id: the reader's reactions, the questions they
+ * had asked, and their own margin notes — the last of which stayed visible on the
+ * article. A reader who clicked the most trustworthy link on the site and then
+ * saw their own words still there has been told a falsehood by the surface that
+ * looks most trustworthy on the site.
+ *
+ * So the rule is now: sever every link, and delete outright only what belongs to
+ * the reader alone.
+ *
+ *   deleted  read receipts and read events — pure reading telemetry.
+ *   deleted  this reader's own reactions. A reaction is a private act with
+ *            nothing attached to it; the codebase already insists a highlight
+ *            belongs to the reader and is never announced. Keeping it while
+ *            claiming erasure contradicted that.
+ *   severed  the anon id on their questions. The question itself stays, because
+ *            it is the writer's signal — §9.5's confusion dashboard is built from
+ *            it — but it no longer points at a browser, so it cannot be joined
+ *            back to a person. Deleting the row would have destroyed the feature's
+ *            whole reason to exist.
+ *   kept     their notes. These are published words in a public margin and other
+ *            readers may have replied to them; deleting them here would destroy
+ *            other people's contributions without their consent. The note's own
+ *            remove control is the right place to withdraw one, and the privacy
+ *            page now says so instead of implying otherwise.
+ */
 export async function forgetReader(anonId: string) {
   const database = await readyDb();
   await database.delete(readReceipts).where(eq(readReceipts.anonId, anonId));
   await database.delete(readEvents).where(eq(readEvents.anonId, anonId));
+  // `voterKeyFor` gives an anonymous reactor `a:{anonId}`, so the prefix is the
+  // only thing separating "this browser" from a claimed user id (`u:{id}`).
+  await database.delete(annotationReactions).where(eq(annotationReactions.voterKey, `a:${anonId}`));
+  // Null rather than delete: keeps the writer-facing signal, drops the link.
+  await database.update(asks).set({ anonId: null }).where(eq(asks.anonId, anonId));
 }
 
 /* -------------------------------------------------------------------------- */
