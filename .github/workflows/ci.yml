@@ -55,6 +55,14 @@ jobs:
       - name: Artifact prop coercion
         run: npx tsx scripts/check-artifact-props.ts
 
+      # Archive import. The format assertions use fixtures shaped like the real
+      # exports — Medium's three body containers, an unclosed <li>, Docs'
+      # font-weight spans, a CSV field with an embedded newline — because an
+      # import that returns the right words with every heading flattened has not
+      # imported the post.
+      - name: Import formats
+        run: npm run test:import:formats
+
       # Draft Autopsy is three named sentences. The assertions are the cases
       # that must fire and the cases that must not, so a later tweak to the
       # jargon heuristic cannot quietly start nagging every code span.
@@ -106,6 +114,13 @@ jobs:
 
       - name: Route smoke test
         run: npm run test:smoke
+
+      # Import driven over HTTP as a real author, against the built server. This
+      # is where the copy on /write#import gets checked rather than assumed: it
+      # asserts that a heading survives all the way to the rendered page, that a
+      # duplicate slug says so in words, and that an anonymous caller is refused.
+      - name: Import API
+        run: npm run test:import:api
 
       - name: Upload build output on failure
         if: failure()

@@ -50,14 +50,23 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   const results = [];
   for (const file of parsed.data.files) {
     const { posts, warnings } = parseImportFile(file.filename, file.content);
+
+    /* Parsing warnings belong to the file, not to a post, and a multi-post
+       format is exactly where they get lost: Hashnode's Export.csv is one file
+       holding two hundred posts, and a row with no content is skipped with a
+       warning that used to go nowhere. The writer saw "imported 199" and had no
+       way to learn which post was missing or that anything was. So the file's
+       warnings ride along with every row it produced. */
+    const fileWarnings = warnings.filter((w) => typeof w === 'string');
+
     if (posts.length === 0) {
       results.push({
         filename: file.filename,
         imported: false,
         title: '',
         slug: '',
-        reason: warnings[0] ?? 'Nothing readable in this file.',
-        warnings,
+        reason: fileWarnings[0] ?? 'Nothing readable in this file.',
+        warnings: fileWarnings,
         inferred: [],
       });
       continue;
@@ -71,6 +80,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       results.push({
         ...outcome,
         draft: Boolean(parsed.data.asDraft),
+        warnings: [...fileWarnings, ...(outcome.warnings ?? [])],
         url: outcome.imported ? `/w/${outcome.slug}` : undefined,
       });
     }

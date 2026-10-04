@@ -156,15 +156,43 @@ export async function importPost(
       inferred,
     };
   } catch (err) {
-    const message = (err as Error).message ?? 'Unknown error';
-    return {
-      ...base,
-      inferred,
-      reason: /unique/i.test(message)
-        ? `A post is already at /w/${slug}. Rename the file or edit its front matter.`
-        : message.slice(0, 200),
-    };
+    return { ...base, inferred, reason: explain(err, slug) };
   }
+}
+
+/**
+ * Why an insert was refused, in words the writer can act on.
+ *
+ * A duplicate slug is the single most likely thing to go wrong when importing an
+ * archive — people re-import, and they import twice by accident — and it is what
+ * this function used to report as `Failed query: insert into "posts" ("id",
+ * "slug", ...)`. The constraint violation is the only useful part of that
+ * message and it is not in it.
+ *
+ * The real cause sits on `cause`, one or two levels down, because Drizzle wraps
+ * whatever the driver threw. So the whole chain is read rather than just the
+ * top message, and the error's own `code` counts too: libsql reports
+ * `SQLITE_CONSTRAINT_UNIQUE`, and matching on that is more reliable than
+ * matching prose that a driver version might reword.
+ */
+function explain(err: unknown, slug: string): string {
+  const parts: string[] = [];
+  let cursor: unknown = err;
+  for (let depth = 0; cursor && depth < 6; depth++) {
+    const e = cursor as { message?: unknown; code?: unknown; cause?: unknown };
+    if (typeof e.message === 'string') parts.push(e.message);
+    if (typeof e.code === 'string') parts.push(e.code);
+    cursor = e.cause;
+  }
+  const text = parts.join(' | ');
+
+  if (/unique|constraint/i.test(text)) {
+    return `A post is already at /w/${slug}. Rename the file or edit its front matter.`;
+  }
+  // Anything else is a genuine surprise, so the driver's own words are better
+  // than a guess — but the SQL statement is not those words.
+  const first = parts.find((p) => p && !/^failed query:/i.test(p.trim()));
+  return (first ?? parts[0] ?? 'Unknown error').slice(0, 200);
 }
 
 /** Stable id for an import run, so a retried batch is traceable in the log. */

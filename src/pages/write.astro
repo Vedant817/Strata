@@ -237,23 +237,32 @@ const claimPath = activeToken ? `/claim/${activeToken}` : null;
             <h2 class="text-xl">Importing an archive</h2>
             <p class="mt-3 text-[1.0625rem] leading-relaxed text-ink-2">
               Switching cost is the archive, so import is step one. Bring Markdown with front
-              matter — what Substack, Hashnode, Dev.to, Obsidian and Ghost all reduce to — or a
-              WordPress XML export. Original publication dates and the address each post used to
-              live at are kept, because a post re-dated to today is not an import, it is a lie about
-              when you believed something.
+              matter — what Substack, Hashnode, Dev.to, Obsidian and Ghost all reduce to — a
+              WordPress XML export, a Medium HTML export, a Google Docs page exported as HTML, or
+              a Hashnode <code>Export.csv</code>. Original publication dates and the address each
+              post used to live at are kept, because a post re-dated to today is not an import, it
+              is a lie about when you believed something. Headings, lists, quotes, code, tables
+              and figures come across as themselves rather than as one run of paragraphs.
             </p>
 
             <div class="mt-5 border border-rule bg-surface p-4" data-import>
               <label class="meta block" for="import-files">
-                Markdown (.md, .markdown, .mdx, .txt) or WordPress XML (.xml)
+                Markdown (.md, .markdown, .mdx, .txt), WordPress (.xml), Medium (.html), Google
+                Docs (.html), or Hashnode (.csv)
               </label>
               <input
                 id="import-files"
                 type="file"
                 multiple
-                accept=".md,.markdown,.mdx,.txt,.xml,text/markdown,text/plain,application/xml,text/xml"
+                accept=".md,.markdown,.mdx,.txt,.xml,.html,.htm,.csv,text/markdown,text/plain,text/html,application/xml,text/xml,text/csv"
                 class="mt-2 block w-full text-[0.9375rem] file:mr-3 file:border file:border-rule file:bg-paper file:px-3 file:py-1.5"
               />
+
+              <p class="meta mt-3 text-ink-3">
+                Medium's download is a zip of one HTML file per post — unzip it and select the
+                files in <code>posts/</code>. Google Docs: File &rarr; Download &rarr; Web page
+                (.html). A Medium export can be many files, so import it in batches.
+              </p>
 
               <details class="mt-4">
                 <summary class="meta cursor-pointer text-ink-3 hover:text-ink">

@@ -86,8 +86,31 @@ export const onRequest = defineMiddleware(async (context, next) => {
     ? `${headerFor(pathname)}`
     : 'private, no-store';
 
-  response.headers.set('cache-control', header);
-  response.headers.append('vary', 'Accept-Encoding');
+  /* Not every Response has mutable headers.
+
+     `Response.redirect()` — which every redirect route here returns, including
+     the ones that matter most, like redeeming a handle claim — hands back
+     headers with the guard flag set. Calling `.set()` on them throws
+     `TypeError: immutable`, and because this is middleware that throw becomes a
+     500 on the redirect itself: the author claims a handle, the confirmation
+     link 500s, and nothing says why.
+
+     So the response is rebuilt with fresh headers rather than mutated in place.
+     One Response allocation per request is not worth optimising against a 500,
+     and the body stream is passed straight through, so nothing is buffered. */
+  const headers = new Headers(response.headers);
+  headers.set('cache-control', header);
+  headers.append('vary', 'Accept-Encoding');
+
+  // These statuses must not carry a body, and constructing one with a body throws.
+  const bodyless = response.status === 204 || response.status === 205 || response.status === 304;
+  const rebuilt = bodyless
+    ? new Response(null, { status: response.status, statusText: response.statusText, headers })
+    : new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
 
   /* Compress, or do not claim to. `Vary: Accept-Encoding` above is a promise
      that the bytes change with the encoding, and on the standalone Node server
@@ -98,7 +121,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
      Vercel's edge compresses before this sees the response, and compressing
      there too would spend CPU to save nothing, so it is skipped when the
      platform is already doing it. */
-  return compressResponse(response, context.request.headers.get('accept-encoding'));
+  return compressResponse(rebuilt, context.request.headers.get('accept-encoding'));
 });
 
 function headerFor(pathname: string): string {

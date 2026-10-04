@@ -30,6 +30,9 @@
     "test:audience": "tsx scripts/check-audience.ts",
     "test:recommend": "tsx scripts/check-recommend.ts",
     "test:citation": "tsx scripts/check-citation-card.ts",
+    "test:import": "tsx scripts/check-import.ts",
+    "test:import:formats": "tsx scripts/check-import-formats.ts",
+    "test:import:api": "tsx scripts/check-import-api.ts",
     "test:compress": "tsx scripts/check-compress.ts",
     "test:field": "node scripts/field-metrics.mjs",
     "test:fonts:browser": "node scripts/check-font-metrics.mjs"
