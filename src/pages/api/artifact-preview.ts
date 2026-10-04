@@ -18,6 +18,7 @@ import { experimental_AstroContainer } from 'astro/container';
 import type { APIRoute } from 'astro';
 import Artifact from '../../components/Artifact.astro';
 import { ARTIFACT_KINDS, formToProps, type ArtifactKind } from '../../lib/artifact-props';
+import { escapeHtml } from '../../lib/inline';
 
 /** Whatever `create()` resolves to, without naming the private constructor. */
 type Container = Awaited<ReturnType<typeof experimental_AstroContainer.create>>;
@@ -58,9 +59,16 @@ export const POST: APIRoute = async ({ request }) => {
     return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
   } catch (err) {
     /* A figure that cannot be drawn is a writer's problem to see, not a 500 that
-       loses the draft they were editing. */
+       loses the draft they were editing.
+
+       Escaped, because this endpoint is anonymous and the message is built from
+       whatever the caller sent. Today `formToProps` cannot throw — every numeric
+       field is `Number(x) || 0` behind a clamp — so this arm is unreachable and
+       the escaping is for the day that stops being true. An error path is exactly
+       where nobody re-reads the interpolation. */
+    const reason = escapeHtml(String((err as Error).message).slice(0, 160));
     return new Response(
-      `<p class="meta">This figure cannot be drawn yet: ${String((err as Error).message).slice(0, 160)}</p>`,
+      `<p class="meta">This figure cannot be drawn yet: ${reason}</p>`,
       { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } },
     );
   }

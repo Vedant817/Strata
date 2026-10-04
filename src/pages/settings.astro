@@ -57,7 +57,7 @@ const myKeys = identity.userId ? await listKeys(identity.userId) : [];
 const keyByProvider = new Map(myKeys.map((k) => [k.providerId, k]));
 ---
 
-<Base title="Reading settings" description="How Strata reads to you." prefs={cookiePrefs}>
+<Base title="Reading settings" description="How Strata reads to you." prefs={cookiePrefs} noindex>
   <div class="shell py-16">
     <div class="max-w-xl">
       <p class="meta">Settings</p>

@@ -14,8 +14,12 @@ export const POST: APIRoute = async ({ request, cookies, redirect }) => {
   const identity = await getIdentity(cookies);
   if (!identity.userId) return new Response('Not signed in.', { status: 401 });
 
-  const form = await request.formData();
-  const action = form.get('action');
+  // Same reason as every other form endpoint: `formData()` throws on a
+  // non-form content type. Without this a signed-in browser posting JSON gets an
+  // uncaught TypeError and a 500 — invisible to an anonymous probe, because the
+  // check above answers first.
+  const form = await request.formData().catch(() => null);
+  const action = form?.get('action');
   const back = '/settings';
   const token = cookies.get(SESSION_COOKIE)?.value ?? null;
 
@@ -26,7 +30,7 @@ export const POST: APIRoute = async ({ request, cookies, redirect }) => {
   }
 
   if (action === 'revoke') {
-    const target = String(form.get('token') ?? '');
+    const target = String(form?.get('token') ?? '');
     const result = await revokeSession(identity.userId, target);
     if (!result.ok) return redirect(`${back}?err=${encodeURIComponent(result.error ?? '')}`, 303);
     // Revoking the session you are using is a sign-out, not a no-op.

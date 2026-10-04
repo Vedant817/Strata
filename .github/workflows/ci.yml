@@ -86,6 +86,14 @@ jobs:
       - name: First loom
         run: npm run test:loom
 
+      # The app, used badly: traversal, hostile queries, every API route against
+      # three content types, private-page indexing, no-script rendering, and the
+      # cache and compression promises checked against the bytes on the wire.
+      # Found two live 500s — /api/notifications and /api/sessions both threw on
+      # a non-form content type — plus six private pages missing noindex.
+      - name: Hostile use
+        run: npm run test:hostile
+
       - name: After-read recommendations
         run: npm run test:recommend
 
