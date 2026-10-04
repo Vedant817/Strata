@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { z } from 'zod';
 import { getIdentity } from '../../lib/repo/auth';
 import { parseImportFile, IMPORT_LIMITS } from '../../lib/import/parse';
+import { humanIssues } from '../../lib/validation';
 import { importPost } from '../../lib/import/service';
 
 /**
@@ -44,7 +45,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
-    return json({ error: first?.message ?? 'Invalid import payload.' }, 400);
+    return json({ error: humanIssues(parsed.error) }, 400);
   }
 
   const results = [];

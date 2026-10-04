@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { readyDb } from '../db';
 import { posts } from '../db/schema';
 import { normaliseLang } from '../highlight';
+import { humanIssues } from '../validation';
 import { nanoid } from '../ids';
 import { parseBody, serializeBody, type Block } from '../blocks';
 import {
@@ -74,7 +75,7 @@ export async function saveDraft(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const parsed = draftSchema.safeParse(doc);
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? 'That draft did not look right.' };
+    return { ok: false, error: humanIssues(parsed.error) };
   }
   const database = await readyDb();
   const [own] = await database.select({ id: posts.id }).from(posts).where(and(eq(posts.id, postId), eq(posts.authorId, authorId))).limit(1);

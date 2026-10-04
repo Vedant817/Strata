@@ -375,19 +375,27 @@
    archive, which otherwise pushes the page wider than a phone and costs the
    reader the left edge of every line.
 
-   It is `break-word` and **not** `anywhere`, and that is a measured decision
-   rather than a preference. `anywhere` also reduces the element's *min-content*
-   width, which is what fixes a flex item's `min-width: auto` refusal to shrink —
-   so it looked like the tidier one-word fix. It cost LCP (2059ms against a 1500ms
-   budget) and made the preference toggles restyle the document badly enough to
-   measure 424ms of INP, because the browser has to recompute intrinsic
-   contributions for the whole text column. `break-word` breaks the same token at
-   the same place; the flex item is shrunk by `min-w-0` on the element itself,
-   which is the standard remedy and costs nothing when no token is long enough to
-   need it. */
+   Both halves of the fix are needed and they do different jobs. `min-w-0` on the
+   flex list item fixes the *cause* — a flex item defaults to `min-width: auto` and
+   refuses to shrink below its content — and `break-word` here breaks the token
+   itself wherever else one turns up, in a paragraph, a table cell or a quote.
+
+   **Do not remove this property to test something.** It was taken out once while
+   investigating an unrelated performance question, and the 4410px-wide page came
+   straight back. `check:content` catches it, which is the only reason it was
+   noticed rather than shipped.
+
+   `overflow-wrap: anywhere` also works, and was tried first. It is not used here
+   because it additionally reduces the element's min-content width, which forces
+   the browser to recompute intrinsic contributions for the whole text column —
+   broader effect than this problem needs. An early version of this comment blamed
+   it for an LCP and INP regression; that was wrong, and stashing the change
+   showed the committed tree failing the same gate identically. The local machine
+   was slower, not the property. */
 @utility article-body {
   max-width: var(--measure);
   margin-inline: auto;
+  overflow-wrap: break-word;
 }
 
 @media (min-width: 1200px) {

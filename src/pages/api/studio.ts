@@ -4,6 +4,7 @@ import { getIdentity } from '../../lib/repo/auth';
 import { addCapture, promoteCapture, setCaptureState, type CaptureState } from '../../lib/repo/studio';
 import { addLink, getPostById, getPostBySlug, markReviewed } from '../../lib/repo/posts';
 import { safeReturnTo } from '../../lib/note-actions';
+import { humanIssues } from '../../lib/validation';
 
 /**
  * Studio mutations. Same shape as the note endpoint: ordinary form posts,
@@ -88,7 +89,7 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url }) => {
 
   const parsed = schema.safeParse(form ? Object.fromEntries(form) : null);
   if (!parsed.success) {
-    target.searchParams.set('studioError', parsed.error.issues[0]?.message ?? 'That did not look right.');
+    target.searchParams.set('studioError', humanIssues(parsed.error));
     return redirect(target.pathname + target.search, 303);
   }
 

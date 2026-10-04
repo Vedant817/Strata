@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { applyNoteAction, noteActionSchema, safeReturnTo } from '../../lib/note-actions';
+import { humanIssues } from '../../lib/validation';
 
 /**
  * Note interactions arrive as ordinary form posts, so reacting, replying,
@@ -28,8 +29,9 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url }) => {
   target.searchParams.delete('note');
 
   if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    target.searchParams.set('noteError', first?.message ?? 'That did not look right.');
+    // Humanised, not the validator's wording: this string is rendered on the
+    // article, in front of the reader who typed it.
+    target.searchParams.set('noteError', humanIssues(parsed.error));
     return redirect(target.pathname + target.search, 303);
   }
 

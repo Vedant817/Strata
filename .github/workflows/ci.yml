@@ -123,6 +123,12 @@ jobs:
       - name: Content stress
         run: npm run test:content
 
+      # What the app says when it refuses something. Five endpoints were putting
+      # Zod's own complaint into a query string and rendering it on the page in
+      # front of the reader: "Invalid input: expected string, received undefined".
+      - name: Reader-facing errors
+        run: npm run test:reader
+
       # Whether a hostile query string becomes markup. Separate from the hostile
       # pass because the answer is not in the bytes: these payloads are inert by
       # escaping, so the only way to tell an inert reflection from a live one is to
