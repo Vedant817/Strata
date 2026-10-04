@@ -107,6 +107,14 @@ jobs:
       - name: Erasure
         run: npm run test:forget
 
+      # 375px, both themes, 200% zoom, tap targets and keyboard focus — the half
+      # of §2.4's definition of done that the design lint cannot see, because a
+      # design system can satisfy every lint rule and still ship unreadable text.
+      # Found --ink-3 at 3.89:1 in light and 3.69:1 in dark, and the lifecycle
+      # colours failing as body text.
+      - name: Viewports
+        run: npm run test:viewports
+
       # Whether a hostile query string becomes markup. Separate from the hostile
       # pass because the answer is not in the bytes: these payloads are inert by
       # escaping, so the only way to tell an inert reflection from a live one is to

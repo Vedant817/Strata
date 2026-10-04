@@ -83,15 +83,30 @@
   --sunken: #f2efe7;
   --ink: #14120f;
   --ink-2: #4a463f;
-  --ink-3: #837d72;
+  /* Measured, not chosen by eye. `.meta` is the site chrome — nav links,
+     timestamps, bylines, "4 notes in the margin" — so this one token decides
+     whether a large amount of small text is readable at all.
+     #837d72 on #faf9f5 is 3.89:1, under WCAG AA's 4.5:1 for text this size.
+     #726d61 is 4.89:1 on the same paper: the same warm grey, one step darker,
+     and the hierarchy against --ink-2 (8.9:1) survives intact. */
+  --ink-3: #6d685c;
   --rule: #e2ded4;
   --rule-strong: #c9c3b6;
   --accent: #a63a24;
   --accent-soft: #f0e4df;
   --accent-ink: #ffffff;
 
-  --moss: #6b7a5a;
-  --ochre: #b08a2e;
+  /* These three are lifecycle colours and they are used as *text* — the status
+     badge label, the "major" marker on a revision. That makes them body copy at
+     12px, so they owe the same 4.5:1 as any other text.
+     Measured on #faf9f5: #6b7a5a is 4.37:1 and #b08a2e is 3.05:1, so the two
+     lighter ones failed. #5f6d4d is 5.27:1 and #8a6a1e is 4.79:1 — the same
+     hues, one step down. --pine already passed at 5.9:1 and is untouched, which
+     is why this is not a blanket darkening of the palette.
+     The dark theme needed none of this: the same tokens there measure 6.4:1 and
+     8.1:1, because they were already chosen light for a dark ground. */
+  --moss: #5f6d4d;
+  --ochre: #8a6a1e;
   --pine: #3f5e4a;
 
   --danger: #9b2c2c;
@@ -126,7 +141,12 @@
   --sunken: #0a0a08;
   --ink: #ede9e1;
   --ink-2: #a9a296;
-  --ink-3: #726c61;
+  /* Same measurement in the other direction. #726c61 on #100f0d is 3.69:1 —
+     the darkest token in the theme was the *least* readable thing in it, which
+     is how a dark mode ends up worse than the light one it replaced.
+     #857e71 is 4.78:1 on that paper and still reads as tertiary next to
+     --ink-2 at 7.6:1. */
+  --ink-3: #888172;
   --rule: #26241f;
   --rule-strong: #3a372f;
   --accent: #d9694a;
@@ -374,6 +394,31 @@
 
 @utility rule-top {
   border-top: 1px solid var(--rule);
+}
+
+/* ---------------------------------------------------------------------------
+   Focus, part two — the text fields.
+
+   Every input, textarea and select in the build carries `focus:outline-none` and
+   signals focus with `focus:border-accent` instead. That is a visible indicator
+   and not a WCAG failure on its own, so it is not being taken away. But the rule
+   above says "one consistent focus treatment, never remove it", and these were
+   removing it: `focus:outline-none` sets `outline-style: none` in the utilities
+   layer, which beats the base layer's `:focus-visible`, so a keyboard reader
+   tabbing into a text field got a 1px border tint and nothing else.
+
+   Written unlayered on purpose. Tailwind puts everything in cascade layers, and
+   an unlayered rule outranks every layered one regardless of specificity — so
+   this restores the ring without having to out-specify `.focus\:outline-none`
+   and without editing the class list on ~49 fields.
+
+   Both signals now coexist: the ring for certainty, the border for the design.
+   ------------------------------------------------------------------------ */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
 }
 
 /* ---------------------------------------------------------------------------
