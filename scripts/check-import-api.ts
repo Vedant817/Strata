@@ -21,7 +21,7 @@ const base = `http://${HOST}:${PORT}`;
 let failures = 0;
 let assertions = 0;
 
-function check(name, cond, detail = '') {
+function check(name: string, cond: boolean, detail = '') {
   assertions++;
   if (cond) console.log(`  ok    ${name}`);
   else {
@@ -40,7 +40,7 @@ let boot = '';
 server.stdout.on('data', (d) => (boot += d));
 server.stderr.on('data', (d) => (boot += d));
 
-async function waitForServer(url, timeoutMs = 60_000) {
+async function waitForServer(url: string, timeoutMs = 60_000) {
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
     try {
@@ -182,7 +182,7 @@ async function main() {
 
   console.log('\nimport API\n');
 
-  const send = async (files, asDraft) => {
+  const send = async (files: Array<{ filename: string; content: string }>, asDraft?: boolean) => {
     const res = await fetch(new URL('/api/import', base), {
       method: 'POST',
       headers: { 'content-type': 'application/json', cookie, origin: base, referer: base + '/write' },
@@ -192,7 +192,7 @@ async function main() {
   };
 
   /** Every request needs the session cookie, including the ones that read pages. */
-  const page = async (pathname) =>
+  const page = async (pathname: string) =>
     fetch(new URL(pathname, base), { headers: { cookie } }).then((r) => r.text());
 
   /* --- Medium ------------------------------------------------------- */
@@ -242,15 +242,19 @@ async function main() {
     /Empty/.test(dropped) && /(skip|no content|empty)/i.test(dropped),
     dropped.slice(0, 400),
   );
-  const rateRow = csv.body.results?.find((r) => r.title?.startsWith('Rate limits'));
+  const rateRow = csv.body.results?.find((r: { title?: string }) => r.title?.startsWith('Rate limits'));
   check('csv: title', rateRow?.title === `Rate limits ${RUN}`, rateRow?.title);
   const cr = await page(rateRow.url);
   check('csv: markdown heading survived', /The default is wrong/.test(cr), cr.slice(cr.indexOf('accident') - 200, cr.indexOf('accident') + 700));
   check('csv: markdown list survived', /<li[\s\S]{0,200}Per token/.test(cr));
   check('csv: inline bold survived', /<strong>accident<\/strong>/.test(cr));
 
-  const quotesRow = csv.body.results?.find((r) => r.title === `Quotes and, commas ${RUN}`);
-  const qr = await page(quotesRow.url);
+  const quotesRow = csv.body.results?.find((r: { title?: string }) => r.title === `Quotes and, commas ${RUN}`);
+  if (!quotesRow?.url) {
+    console.error(`  quotes post was not imported: ${JSON.stringify(csv.body.results).slice(0, 400)}`);
+    process.exitCode = 1;
+  }
+  const qr = quotesRow?.url ? await page(quotesRow.url) : '';
   /* renderInline escapes quotes to &quot;, which is correct HTML. What matters is
      that the word survived the CSV field boundary intact — a parser that split
      on commas would have truncated this at `Body with a comma`. */

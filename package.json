@@ -34,6 +34,7 @@
     "test:import:formats": "tsx scripts/check-import-formats.ts",
     "test:import:api": "tsx scripts/check-import-api.ts",
     "test:compress": "tsx scripts/check-compress.ts",
+    "test:digest": "tsx scripts/check-digest.ts",
     "test:field": "node scripts/field-metrics.mjs",
     "test:fonts:browser": "node scripts/check-font-metrics.mjs"
   },

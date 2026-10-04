@@ -23,7 +23,18 @@ export default defineConfig({
     // DOM, because shipping a framework runtime to re-render a textarea and move
     // an SVG line cost more than every other script on the page combined.
     sitemap({
-      filter: (page) => !page.includes('/studio') && !page.includes('/api/'),
+      /* `/week` is per-reader: its contents depend on one visitor's follows
+         and finished reads, so listing it would be an invitation for a crawler
+         to cache it and serve one reader's constellation to the next. It is
+         `noindex` and `private, no-store` as well; this is the third lock.
+
+         The trailing slash matters: the sitemap writes `<loc>` with one, so a
+         filter anchored at `/week` matches nothing and the page ships in the
+         sitemap anyway. An earlier version of this exact filter did. */
+      filter: (page) =>
+        !page.includes('/studio') &&
+        !page.includes('/api/') &&
+        !/^\/week\/?$/.test(new URL(page).pathname),
     }),
   ],
   vite: {

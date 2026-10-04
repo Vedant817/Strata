@@ -1,0 +1,144 @@
+---
+import Base from '../layouts/Base.astro';
+import { getIdentity } from '../lib/repo/auth';
+import { buildConstellationDigest } from '../lib/repo/digest';
+import { listTopics } from '../lib/repo/taxonomy';
+
+/**
+ * The reader's weekly digest — PLAN.md §9.7, §10.4.
+ *
+ * Distinct from `/digest.xml` and from the email, and the difference is not
+ * cosmetic. Both of those are the *site* digest: an RSS response is one URL for
+ * everybody, and a newsletter row is an email address and nothing else, so there
+ * is no honest way for either to rank differently per reader. This page can,
+ * because it is rendered per request from the reader's own history.
+ *
+ * `private, no-store` below, and the same reason the article pages are
+ * uncacheable: this page's contents depend on one reader's follows and their
+ * finished reads, so a shared cache would hand the first reader's constellation
+ * to whoever asked next. It is `noindex` and out of the sitemap for the same
+ * reason — three locks on one door.
+ *
+ * Anonymous-first: it works from the `strata_anon` cookie every reader already
+ * has, so there is nothing to sign up for and no account needed in order to be
+ * shown what you have been reading.
+ *
+ * Two things this page deliberately does not do, both of which a JSX comment
+ * here used to try to explain — and which crashed Astro's TSX transform, along
+ * with a raw double quote in the prose below. Both belong in a file comment
+ * rather than in a JSX comment for that reason:
+ *
+ *   1. `item.detail` is rendered verbatim. For a revision that is the author's
+ *      own change summary, and paraphrasing someone's change note would be
+ *      inventing a quote.
+ *   2. `because` is only ever a statement about what the reader did — a follow,
+ *      or a finished read. It is never a claim about what they might like.
+ */
+
+const identity = await getIdentity(Astro.cookies);
+const since = Date.now() - 7 * 86_400_000;
+const digest = await buildConstellationDigest(
+  { anonId: identity.anonId, userId: identity.userId },
+  since,
+);
+
+Astro.response.headers.set('cache-control', 'private, no-store');
+
+const allTopics = await listTopics();
+const weekOf = new Date(since).toLocaleDateString('en-GB', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+});
+
+const follows = digest.signals.follows;
+const reads = digest.signals.readCount;
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+let explanation: string;
+if (!identity.anonId) {
+  explanation = 'Nothing to go on yet: this browser has not read anything, so this is everything that moved.';
+} else if (digest.personalised) {
+  const sources: string[] = [];
+  if (follows > 0) sources.push(plural(follows, 'author', 'authors'));
+  if (reads > 0) sources.push(plural(reads, 'post', 'posts'));
+  const joined =
+    sources.length === 0
+      ? ''
+      : sources.length === 1
+        ? `the ${sources[0]} you follow`
+        : `the ${sources[0]} you follow and the ${sources[1]} you finished`;
+  explanation = `Ranked from ${joined}.`;
+} else {
+  explanation = `You have finished ${plural(reads, 'post', 'posts')}, none in a topic yet. This is everything that moved.`;
+}
+---
+
+<Base
+  title="Your week on Strata"
+  description="The posts that moved this week, and why you are seeing them."
+  noindex
+>
+  <main id="main">
+    <section class="shell">
+      <div class="max-w-2xl">
+        <h1 class="mt-8 text-3xl">Your week</h1>
+        <p class="meta mt-2">Since {weekOf}</p>
+
+        <p class="mt-6 text-[1.0625rem] leading-relaxed text-ink-2">{explanation}</p>
+
+        {
+          digest.items.length === 0 ? (
+            <p class="mt-6 text-ink-3">
+              Nothing moved this week. That is the whole message &mdash; there is no
+              &ldquo;you have 0 new posts&rdquo; notification to dismiss.
+            </p>
+          ) : (
+            <ol class="mt-8 space-y-6">
+              {digest.items.map((item) => (
+                <li class="border-t border-rule pt-5">
+                  <a href={`/w/${item.slug}`} class="block no-underline hover:text-accent">
+                    <span class="text-[1.1875rem] leading-snug">{item.title}</span>
+                  </a>
+                  <p class="meta mt-1">
+                    {item.authorName}
+                    {item.kind === 'revised' ? ' · revised' : ''}
+                  </p>
+                  {item.dek && <p class="mt-2 leading-relaxed text-ink-2">{item.dek}</p>}
+                  <p class="meta mt-2 text-ink-3">{item.detail}</p>
+                  {item.because && <p class="meta mt-1 text-accent">{item.because}</p>}
+                </li>
+              ))}
+            </ol>
+          )
+        }
+
+        {
+          allTopics.length > 0 && (
+            <section class="mt-12 border-t border-rule pt-6">
+              <h2 class="text-xl">Constellations</h2>
+              <p class="mt-2 text-[0.9375rem] text-ink-2">
+                Follow an author, or read a few posts on a topic, and next week's list is built from
+                that instead of from what is newest.
+              </p>
+              <ul class="mt-4 flex flex-wrap gap-2">
+                {allTopics.slice(0, 12).map((t) => (
+                  <li>
+                    <a href={`/t/${t.slug}`} class="meta no-underline hover:text-accent">
+                      {t.name}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )
+        }
+
+        <p class="meta mt-12 border-t border-rule pt-5 text-ink-3">
+          The same three posts go out by <a href="/digest.xml" class="no-underline hover:text-accent">RSS</a>
+          and by email. Neither can know who is reading it, so neither pretends to.
+        </p>
+      </div>
+    </section>
+  </main>
+</Base>

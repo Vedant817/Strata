@@ -105,6 +105,13 @@ jobs:
       - name: Field metrics (LCP / CLS / INP)
         run: npm run test:field
 
+      # The return hook. Two claims that are not obvious from reading the code:
+      # that the list is actually per-reader, and that one reader's history
+      # cannot reach the next one. Driven through a browser because the caching
+      # headers are part of the claim and only exist on the wire.
+      - name: Constellation digest
+        run: npm run test:digest
+
       # The database is a local libsql file and migrations run on first query,
       # so CI needs no service container. Seeding gives the route check real
       # posts to render rather than a wall of 404s. The smoke script boots the
