@@ -63,6 +63,26 @@ jobs:
         with:
           chrome-version: stable
 
+      # The build, before anything that boots the server.
+      #
+      # Fourteen of the gates below start `dist/server/entry.mjs` — the loom,
+      # hostile-use, erasure, viewport, content-stress, reflection and digest
+      # passes among them. The build used to sit near the bottom of this file, so
+      # on a clean runner they were all being asked to boot a build that did not
+      # exist. `test:loom` failed outright with MODULE_NOT_FOUND; the rest were
+      # waiting to.
+      #
+      # Invisible locally for the same reason the missing seed was: a developer
+      # always has a `dist/` from their last build, and a stale one still boots.
+      # Only CI, which starts from nothing, sees the ordering.
+      #
+      # So this happens once, early, and everything after it measures the build
+      # that is actually going out rather than a developer's stale artefact.
+      - name: Build
+        run: npm run build
+        env:
+          SITE_URL: https://strata.pub
+
       # Design lint first: it is milliseconds, and it is the rule that is
       # easiest to break by accident and hardest to notice in review.
       - name: Design lint
@@ -197,10 +217,8 @@ jobs:
       - name: WebAuthn CBOR and attestation parsing
         run: npx tsx scripts/check-webauthn-cbor.ts
 
-      - name: Build
-        run: npm run build
-        env:
-          SITE_URL: https://strata.pub
+      # The build ran near the top of this job, before any gate that boots the
+      # server; see that step for why the ordering was wrong.
 
       # LCP, CLS and INP on a throttled profile. A runner is a two-core VM shared
       # with the rest of the host, and Lighthouse applies 4x CPU slowdown on top
