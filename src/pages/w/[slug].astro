@@ -56,14 +56,6 @@ const identity = await getIdentity(Astro.cookies);
 const prefs = resolvePrefs(Astro.cookies as never, anonId);
 const depth: Depth = prefs.depth;
 
-/** Revision view. `?rev=N` renders any historical version in place. A revision
- *  that does not exist is a bad link, not a crash — answer 404 honestly so it
- *  shows up in logs instead of silently rendering the current version. */
-const requestedRev = Number(Astro.url.searchParams.get('rev') ?? '');
-const isViewingOld = Number.isFinite(requestedRev) && requestedRev > 0;
-const view = await getRevisionView(post.id, isViewingOld ? requestedRev : undefined);
-if (!view) return new Response(null, { status: 404, statusText: 'Not found' });
-
 const doc = post.blocks;
 const hasUnderstand = doc.some((b) => b.layer === 'understand');
 const hasMaster = doc.some((b) => b.layer === 'master');
@@ -72,6 +64,15 @@ const minutes = {
   understand: minutesAtDepth(doc, 'understand'),
   master: minutesAtDepth(doc, 'master'),
 };
+
+/** Revision view. `?rev=N` renders any historical version in place. A revision
+ *  that does not exist is a bad link, not a crash — answer 404 honestly so it
+ *  shows up in logs instead of silently rendering the current version. */
+const requestedRev = Number(Astro.url.searchParams.get('rev') ?? '');
+const isViewingOld = Number.isFinite(requestedRev) && requestedRev > 0;
+
+/** Marginalia, resolved against the text the reader is actually looking at. */
+const blockTexts = new Map(doc.map((b) => [b.id, blockToPlainText(b)]));
 
 // Telemetry must never block or fail the response.
 void (async () => {
@@ -83,26 +84,102 @@ void (async () => {
   }
 })();
 
-const versions = await getVersions(post.id);
-const lastSeen = await getLastReceipt(anonId, post.id);
-const nextReads = lastSeen
-  ? await recommendAfterRead(anonId, identity.userId, post.id)
-  : [];
+/**
+ * One round-trip's worth of waiting, not twelve.
+ *
+ * This page needs the revision view, the version list, the reader's last receipt,
+ * both neighbours, webmentions, every annotation, the participant count, the
+ * saved flag, the reader's lists, both sets of highlights, the post's place in
+ * the graph, and which model providers this reader holds a key for. Every one of
+ * those was `await`ed on its own line, so the page spent the sum of twelve
+ * database round-trips before it wrote a single byte of HTML — measured at 633ms
+ * of server time against 23ms for the homepage, which needs far less and was
+ * still an order of magnitude faster.
+ *
+ * They do not depend on each other. None of them reads another's result; they
+ * all read the post, the cookie and the URL, all of which are in hand above. So
+ * they are issued together and awaited once.
+ *
+ * This is the article's LCP, and it was worth more than any rendering change:
+ * `npm run test:field` reported FCP exactly equal to LCP on all ten of its runs,
+ * which means the page's first paint *is* the moment the document finishes
+ * arriving. On Slow 4G the 150ms of added latency lands in front of every
+ * millisecond saved here, and the whole budget was being spent in the database.
+ *
+ * Two dependencies remain genuinely serial, and are left serial below:
+ * `recommendAfterRead` needs to know whether there *is* a previous read, and
+ * `myReactions` needs the annotation ids first. Guessing either one to save a
+ * round-trip would trade a correct answer for a faster wrong one.
+ */
+const [
+  view,
+  versions,
+  lastSeen,
+  adjacent,
+  mentions,
+  allNotes,
+  participants,
+  isSavedNow,
+  ownLists,
+  myHighlightsRaw,
+  postHighlights,
+  neighbourhood,
+  readerKeys,
+] = await Promise.all([
+  getRevisionView(post.id, isViewingOld ? requestedRev : undefined),
+  getVersions(post.id),
+  getLastReceipt(anonId, post.id),
+  getAdjacent(post.id),
+  listMentions(post.id),
+  listAnnotations(post.id, blockTexts, {
+    anonId,
+    authorId: identity.userId,
+    currentVersionId: post.currentVersionId ?? '',
+  }),
+  countParticipants(post.id),
+  isSaved(memoryKeyFor(identity.userId, anonId), post.id),
+  identity.userId
+    ? myReadingLists(identity.userId)
+    : Promise.resolve([] as Awaited<ReturnType<typeof myReadingLists>>),
+  getMyHighlights(anonId, identity.userId),
+  getPostHighlights(post.id, anonId, identity.userId),
+  getNeighbourhood(post.id).catch(() => null),
+  /* Was a `for` loop awaiting `resolveKey` once per provider — an N+1 that made
+     a signed-in reader's page cost one round-trip per model provider on top of
+     everything else, to build a set of booleans. */
+  identity.userId
+    ? Promise.all(
+        PROVIDERS.map((p) =>
+          resolveKey(identity.userId as string, p.id)
+            .then(Boolean)
+            .catch(() => false),
+        ),
+      )
+    : Promise.resolve([] as boolean[]),
+]);
+
+if (!view) return new Response(null, { status: 404, statusText: 'Not found' });
+
+const nextReads = lastSeen ? await recommendAfterRead(anonId, identity.userId, post.id) : [];
 const hasChangesSince = Boolean(
   lastSeen && lastSeen.versionId !== view.current.id && lastSeen.versionNumber < view.current.versionNumber,
 );
 
 const stats = diffStats(view.diff);
 const reviewed = post.lastReviewedAt ? shortAgo(post.lastReviewedAt) : null;
-const { newer, older } = await getAdjacent(post.id);
+const { newer, older } = adjacent;
 
-// Marginalia, resolved against the text the reader is actually looking at.
-const blockTexts = new Map(doc.map((b) => [b.id, blockToPlainText(b)]));
-const mentions = await listMentions(post.id);
-const allNotes = await listAnnotations(post.id, blockTexts, {
-  anonId,
-  authorId: identity.userId,
-  currentVersionId: post.currentVersionId ?? '',
+/** Which reactions this reader has already given, so the buttons can be pressed
+ *  rather than merely counted. Needs the annotation ids, so it waits for them. */
+const myReactionSet = await myReactions(
+  voterKeyFor(identity.userId, anonId),
+  allNotes.map((n) => n.id),
+);
+const mineReactions = [...myReactionSet];
+
+const readerHasKey = new Set<string>();
+PROVIDERS.forEach((p, i) => {
+  if (readerKeys[i]) readerHasKey.add(p.id);
 });
 
 /** Sort modes. "Contested" is the one that matters: a post where readers
@@ -152,26 +229,13 @@ for (const note of sortNotes(rootNotes)) {
   (notesByBlock[note.blockId] ??= []).push(note);
 }
 
-const participants = await countParticipants(post.id);
 const myNoteCount = allNotes.filter((n) => n.isMine).length;
 const isPostAuthor = identity.userId === post.authorId;
 const staleNotes = allNotes.filter((n) => n.onOlderRevision).length;
 
-/** Which reactions this reader has already given, so the buttons can be pressed
- *  rather than merely counted. */
-const myReactionSet = await myReactions(
-  voterKeyFor(identity.userId, anonId),
-  allNotes.map((n) => n.id),
-);
-const mineReactions = [...myReactionSet];
-const isSavedNow = await isSaved(memoryKeyFor(identity.userId, anonId), post.id);
-const ownLists = identity.userId ? await myReadingLists(identity.userId) : [];
-
 /** This reader's own highlights on this post, if any — the only place a
  *  highlight is ever shown to the person who made it. */
-const myHighlights = (await getMyHighlights(anonId, identity.userId)).filter(
-  (h) => h.postSlug === post.slug,
-);
+const myHighlights = myHighlightsRaw.filter((h) => h.postSlug === post.slug);
 const myHighlightCount = myHighlights.length;
 
 /** The same highlights, keyed by block, so the prose can paint the quotes back
@@ -179,7 +243,7 @@ const myHighlightCount = myHighlights.length;
  *  click that made it — reload the article and a reader's own highlighting was
  *  gone from the text, only the list at the foot remembered it. */
 const myBlockHighlights: Record<string, string[]> = {};
-for (const h of await getPostHighlights(post.id, anonId, identity.userId)) {
+for (const h of postHighlights) {
   (myBlockHighlights[h.blockId] ??= []).push(h.text);
 }
 
@@ -237,16 +301,8 @@ const stressResult = stressAsked
     )
   : null;
 
-/** Where this post sits in the graph, or null if it is not in the public graph. */
-const neighbourhood = await getNeighbourhood(post.id).catch(() => null);
-
-/** Providers this reader could actually use: their own keys, plus the owner's. */
-const readerHasKey = new Set<string>();
-if (identity.userId) {
-  for (const p of PROVIDERS) {
-    if (await resolveKey(identity.userId, p.id).catch(() => null)) readerHasKey.add(p.id);
-  }
-}
+/** Providers this reader could actually use: their own keys, plus the owner's.
+ *  Resolved in the batch above — one round-trip for all of them, not one each. */
 const askProviders = PROVIDERS.filter((p) => readerHasKey.has(p.id) || Boolean(houseKeyFor(p.id)));
 /**
  * Per-provider honesty about the word "free". OpenRouter publishes prices, so
