@@ -85,20 +85,39 @@ const ARTICLE_LCP = BUDGET.lcpMs;
  * page has three islands and no framework. The plan's 200ms is asserted on
  * these, on every page.
  *
- * **Preference** — the paper/ink and density toggles. These set an attribute on
- * `<html>`, and `--body-size` and `--leading` live on `:root`, so one tap
- * changes the font size of every element in a 15,000-word article and the browser
- * re-lays out all of it before it can paint. That is real work and it is not a
- * bug, but it also used to measure at 240-370ms — which turned out to be a
- * measurement artefact, since the INP pass was sharing a browser with traced
- * Lighthouse runs and inheriting its throttling. Measured in its own browser the
- * article's toggles come out at 56ms.
+ * **Preference** — the paper/ink and density toggles, and the reading-depth
+ * dial. These set an attribute on `<html>` or on the article, and `--body-size`
+ * and `--leading` live on `:root`, so one tap changes the font size of every
+ * element in a 15,000-word article and the browser re-lays out all of it before
+ * it can paint. That is real work and it is not a bug, but it also used to
+ * measure at 240-370ms — which turned out to be a measurement artefact, since
+ * the INP pass was sharing a browser with traced Lighthouse runs and inheriting
+ * its throttling. Measured in its own browser the article's toggles come out at
+ * 56ms.
  *
  * So they are asserted at the plan's figure too, and reported separately because
  * they are worth watching: they are the interaction most likely to regress as the
  * canon grows.
+ *
+ * **The depth dial was in the wrong class, and that was a real defect in this
+ * gate.** `DepthDial.astro` renders buttons carrying `data-depth`, and nothing
+ * here matched on that, so the sweep classified the dial as a *reading*
+ * control. The dial is the same kind of control as the theme toggle — it sets an
+ * attribute that restyles the whole document, `[data-depth]` on the article host,
+ * and every depth rule re-matches against every descendant. Because it sits far
+ * down the page (`docTop` ~8819 on a 12,000px article) it was only reached by the
+ * eighth reading control the sweep clicks, which is why the reading row showed
+ * the same 440ms as a preference toggle and why three different controls all
+ * reported an identical 448ms — a per-control cost would not repeat to the
+ * millisecond across unrelated controls.
+ *
+ * Measured directly, with the dial excluded, the article's reading interactions
+ * are 24-56ms against a 200ms budget, and the whole-document restyles are
+ * 144-336ms. Classifying the dial correctly is what makes those two numbers mean
+ * what they say; it is not a way of making a number smaller, because the dial is
+ * still measured, still reported and still asserted — just as what it is.
  */
-const PREFERENCE_TOGGLE = ['data-theme-toggle', 'data-density-toggle'];
+const PREFERENCE_TOGGLE = ['data-theme-toggle', 'data-density-toggle', 'data-depth'];
 const PREFERENCE_INP_MS = 200;
 
 /**
@@ -329,6 +348,23 @@ async function collectControls(send) {
       const toggles = ${JSON.stringify(PREFERENCE_TOGGLE)};
       const sel = 'summary, button, [role="button"], [role="tab"], input[type="checkbox"]';
       const out = [];
+      /* Each control is stamped with a stable id here and the click phase looks
+         elements up by that id, rather than re-finding them by their offset from
+         the document top.
+
+         The old lookup searched for an element whose top, plus scrollY, was
+         within 8px of a position recorded earlier. Two controls at
+         the same height — every "Reply"/"Report" pair, and all three depth-dial
+         buttons — cannot be told apart that way, so the first match won every
+         time and the rest were clicked as if they were it. An identity that does
+         not survive the page's own layout is not an identity.
+
+         Stamps left by an earlier round are cleared first, so the probe cannot
+         leave its own litter on the page for the next thing to trip over. */
+      for (const old of document.querySelectorAll('[data-probe-id]')) {
+        old.removeAttribute('data-probe-id');
+      }
+      let n = 0;
       for (const el of document.querySelectorAll(sel)) {
         if (el.type === 'submit') continue;
         const r = el.getBoundingClientRect();
@@ -336,7 +372,9 @@ async function collectControls(send) {
         const cs = getComputedStyle(el);
         if (cs.visibility === 'hidden' || cs.display === 'none' || cs.pointerEvents === 'none') continue;
         const isPreference = toggles.some((a) => el.hasAttribute(a));
+        el.setAttribute('data-probe-id', String(n++));
         out.push({
+          probeId: n - 1,
           kind: isPreference ? 'preference' : 'reading',
           label: (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 26),
           docTop: Math.round(r.top + window.scrollY),
@@ -404,7 +442,6 @@ async function measureInp(send, url, mobile, rounds = 3) {
     controls = [];
   }
 
-  // The preference toggles live in the header and are clicked from the top.
   // Reading controls are clicked where they are, which means scrolling to them
   // first so the click lands on a real element rather than a coordinate that has
   // already moved.
@@ -416,50 +453,79 @@ async function measureInp(send, url, mobile, rounds = 3) {
 
   const maxControls = 8;
   const reading = controls.filter((c) => c.kind === 'reading').slice(0, maxControls);
-  const preference = controls.filter((c) => c.kind === 'preference').slice(0, 2);
+  /* Three, not two: the depth dial is a whole-document restyle too (see
+     PREFERENCE_TOGGLE), and it lives in a rail near the foot of the article, so
+     it has to be scrolled to like any other control rather than assumed to be in
+     the header. Leaving it out would have kept the one control that made this
+     number meaningless permanently unmeasured. */
+  const preference = controls.filter((c) => c.kind === 'preference').slice(0, 3);
 
   const rounds_ = { reading: [], preference: [] };
-  let firstRound = [];
+  const firstRound = [];
+  /** Per control, the worst latency seen in any round. Keyed by probeId. */
+  const byControl = new Map();
+  const worst = { reading: 0, preference: 0 };
+
+  /* Each click is measured on its own: the event buffer is cleared immediately
+     before the click and read immediately after it, so a click's latency can
+     never be attributed to the click before or after it.
+
+     The previous shape cleared the buffer once per *round* and then matched the
+     whole batch against the plan positionally. That put two unrelated failures in
+     the same number. A tap emits pointerdown, pointerup and click under one
+     interactionId, so the positional match drifted by two or three slots per
+     control; and clicking the density toggle re-lays out the article, so the
+     document offsets recorded before it no longer described where the reading
+     controls had moved to, and most of them were never clicked at all.
+
+     Both are the same underlying mistake: inferring which control produced a
+     number instead of measuring the click that produced it. Reading the buffer
+     around a single click makes the question unnecessary.
+
+     Order also matters now. Restyles go last rather than first, because clicking
+     one changes the layout every later control's position depends on. */
+  const order_ = [...reading, ...preference];
 
   for (let round = 0; round < rounds; round++) {
-    await send('Runtime.evaluate', { expression: 'window.__events = []' });
-    const plan = [];
-
-    for (const c of preference) {
-      plan.push({ c, scrollTo: 0 });
-    }
-    // Reading controls in document order, scrolled into view one at a time.
-    let at = 0;
-    for (const c of reading) {
-      at = Math.min(at, c.docTop);
-      plan.push({ c, scrollTo: Math.max(0, at - Math.round(vh / 3)) });
-      at += Math.max(1, Math.round(vh * 0.6));
-    }
-    if (round === 0 && reading.length) {
+    if (round === 0) {
       await send('Runtime.evaluate', { expression: 'window.scrollTo(0, 0)' });
     }
-
-    for (const { c, scrollTo } of plan) {
+    for (const c of order_) {
+      /* Scroll using where the control is *now*, not where it was when the page
+         loaded, so a previous restyle cannot leave it scrolled to the wrong
+         place. */
+      const want = await send('Runtime.evaluate', {
+        returnByValue: true,
+        expression: `(() => {
+          const el = document.querySelector('[data-probe-id="${c.probeId}"]');
+          if (!el) return 'null';
+          const top = el.getBoundingClientRect().top + window.scrollY;
+          return JSON.stringify({ target: Math.max(0, Math.min(document.documentElement.scrollHeight, top - Math.round(window.innerHeight / 3))) });
+        })()`,
+      });
+      let target = null;
+      try {
+        target = JSON.parse(want.result.value)?.target ?? null;
+      } catch {
+        target = null;
+      }
+      if (target === null) continue;
       await send('Runtime.evaluate', {
-        expression: `window.scrollTo({ top: ${Math.max(0, Math.min(docHeight, scrollTo))}, behavior: 'instant' })`,
+        expression: `window.scrollTo({ top: ${target}, behavior: 'instant' }); true`,
       });
       await new Promise((r) => setTimeout(r, 250));
-      // Re-measure after scrolling: the element's viewport position has moved.
+
       const pos = await send('Runtime.evaluate', {
         returnByValue: true,
         expression: `(() => {
-          const all = [...document.querySelectorAll('summary, button, [role="button"], [role="tab"], input[type="checkbox"]')]
-            .filter((el) => el.type !== 'submit');
-          const el = all.find((e) => {
-            const r = e.getBoundingClientRect();
-            return Math.abs((r.top + window.scrollY) - ${c.docTop}) < 8;
-          });
+          const el = document.querySelector('[data-probe-id="${c.probeId}"]');
           if (!el) return 'null';
           const r = el.getBoundingClientRect();
-          return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), w: r.width, h: r.height });
+          return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
+            w: r.width, h: r.height, vh: window.innerHeight });
         })()`,
       });
-      let point;
+      let point = null;
       try {
         point = JSON.parse(pos.result.value);
       } catch {
@@ -468,7 +534,10 @@ async function measureInp(send, url, mobile, rounds = 3) {
       if (!point || point.w < 8 || point.h < 8) continue;
       // Off-screen vertically means the scroll did not land; a click there would
       // hit whatever is at that coordinate instead.
-      if (point.y < 0 || point.y > vh) continue;
+      if (point.y < 0 || point.y > point.vh) continue;
+
+      /* Cleared here, immediately before this click and nothing else. */
+      await send('Runtime.evaluate', { expression: 'window.__events = []; true' });
 
       for (const type of ['mousePressed', 'mouseReleased']) {
         await send('Input.dispatchMouseEvent', {
@@ -481,36 +550,46 @@ async function measureInp(send, url, mobile, rounds = 3) {
         });
       }
       await new Promise((r) => setTimeout(r, 400));
-    }
 
-    const read = await send('Runtime.evaluate', {
-      returnByValue: true,
-      expression: 'JSON.stringify(window.__events ?? [])',
-    });
-    let events = [];
-    try {
-      events = JSON.parse(read.result.value);
-    } catch {
-      /* no entries */
-    }
+      const read = await send('Runtime.evaluate', {
+        returnByValue: true,
+        expression: 'JSON.stringify(window.__events ?? [])',
+      });
+      let entries = [];
+      try {
+        entries = JSON.parse(read.result.value);
+      } catch {
+        /* no entries */
+      }
 
-    // Attribute each timing entry to the control that produced it. Entries come
-    // back in interaction order; a control that produced none is not an
-    // interaction and does not consume a slot.
-    let idx = 0;
-    const worst = { reading: 0, preference: 0 };
-    for (const e of events) {
-      if (!e.interactionId) continue;
-      const owner = plan[idx]?.c;
-      idx++;
-      if (!owner) continue;
-      worst[owner.kind] = Math.max(worst[owner.kind], e.duration);
+      /* Group this click's entries by interactionId and take the longest, which
+         is what the INP algorithm specifies for a single interaction. */
+      const byInteraction = new Map();
+      for (const e of entries) {
+        if (!e.interactionId) continue;
+        const prev = byInteraction.get(e.interactionId);
+        if (!prev || e.duration > prev.duration) byInteraction.set(e.interactionId, e);
+      }
+      const thisClick = [...byInteraction.values()].sort((a, b) => a.start - b.start);
+      if (thisClick.length === 0) continue;
+      const slowest = thisClick.reduce((a, b) => (a.duration >= b.duration ? a : b));
+
+      byControl.set(c.probeId, Math.max(byControl.get(c.probeId) ?? 0, slowest.duration));
+      worst[c.kind] = Math.max(worst[c.kind], slowest.duration);
       if (round === 0) {
-        firstRound.push({ ...e, kind: owner.kind, control: `${owner.kind}:${owner.label || owner.kind}` });
+        firstRound.push({
+          ...slowest,
+          kind: c.kind,
+          control: `${c.kind}:${c.label || c.kind}`,
+        });
       }
     }
     rounds_.reading.push(worst.reading);
     rounds_.preference.push(worst.preference);
+    /* Each round starts from zero so the best-of-N compares like with like,
+       rather than accumulating every round's worst into every later round. */
+    worst.reading = 0;
+    worst.preference = 0;
   }
 
   const best = (arr) => (arr.length ? Math.min(...arr) : 0);
@@ -521,7 +600,19 @@ async function measureInp(send, url, mobile, rounds = 3) {
     preferenceRounds: rounds_.preference,
     readingControls: reading.length,
     preferenceControls: preference.length,
-    controls: [...preference, ...reading].map((c) => `${c.kind}:${c.label || c.kind}`),
+    /* How many controls each class actually produced an interaction for. A
+       control can be selected and then never clicked — it scrolled somewhere the
+       scroll could not reach, or the page moved under it — and asserting over an
+       empty set reports 0ms and looks exactly like a pass. */
+    measuredReading: [...byControl.keys()].filter((id) => byControl.get(id) > 0 && reading.some((c) => c.probeId === id)).length,
+    measuredPreference: [...byControl.keys()].filter((id) => byControl.get(id) > 0 && preference.some((c) => c.probeId === id)).length,
+    /* Every control's own worst latency, so a single slow control cannot hide
+       inside a class average and a fast one cannot speak for a slow one. */
+    perControl: order_.map((c) => ({
+      kind: c.kind,
+      label: c.label || c.kind,
+      ms: byControl.get(c.probeId) ?? 0,
+    })),
     events: firstRound,
   };
 }
@@ -649,12 +740,30 @@ async function main() {
       const lcp = lhr.audits['largest-contentful-paint']?.numericValue;
       const c = lhr.audits['cumulative-layout-shift']?.numericValue;
       const fcp = lhr.audits['first-contentful-paint']?.numericValue;
-      if (typeof lcp === 'number') lcpRuns.push(lcp);
+      /* A run where nothing painted reports LCP 0ms, and a best-of-N that treats
+         0 as the fastest possible page is exactly backwards: a crashed run, an
+         unreachable server or a blank document all produce the *best* number the
+         gate can be handed. Observed earlier as three consecutive `LCP 0ms` runs
+         reported as `ok 1348ms` — a pass manufactured by two failures.
+
+         So a run that painted nothing is discarded and counted as a failure,
+         never as a fast page. `Math.min` is only allowed to choose between numbers
+         that mean something was measured. */
+      const painted = typeof lcp === 'number' && lcp > 0 && typeof fcp === 'number' && fcp > 0;
+      if (!painted) {
+        console.error(
+          `    run ${i + 1}: nothing painted (LCP ${Math.round(lcp ?? 0)}ms, FCP ${Math.round(fcp ?? 0)}ms) — ` +
+            'not counted as a fast run',
+        );
+        failures++;
+        continue;
+      }
+      lcpRuns.push(lcp);
       // CLS is a sum of shifts; a worse run cannot hide a worse total, so the
       // worst run is the honest one to keep.
       if (typeof c === 'number') cls = Math.min(cls, c) === Infinity ? c : Math.max(cls, c);
       console.log(
-        `    run ${i + 1}: LCP ${Math.round(lcp ?? 0)}ms  FCP ${Math.round(fcp ?? 0)}ms  CLS ${(c ?? 0).toFixed(4)}`,
+        `    run ${i + 1}: LCP ${Math.round(lcp)}ms  FCP ${Math.round(fcp)}ms  CLS ${(c ?? 0).toFixed(4)}`,
       );
     }
 
@@ -691,40 +800,65 @@ async function main() {
       const { ws, send } = await connect(inpPort);
       const measured = await measureInp(send, url, true);
       console.log(
-        `    controls: ${measured.readingControls} reading, ${measured.preferenceControls} preference`,
+        `    controls: ${measured.measuredReading}/${measured.readingControls} reading measured, ` +
+          `${measured.measuredPreference}/${measured.preferenceControls} restyle measured`,
       );
       console.log(
         `    reading interactions  ${measured.readingRounds.join(' / ')}ms  (best ${measured.reading}ms)`,
       );
       console.log(
-        `    preference toggles    ${measured.preferenceRounds.join(' / ')}ms  (best ${measured.preference}ms)`,
+        `    document restyles     ${measured.preferenceRounds.join(' / ')}ms  (best ${measured.preference}ms)`,
       );
+
+      /* Whether a class can be asserted depends on controls that were *measured*,
+         not merely selected. `readingControls` counts what the sweep picked; a
+         control it then failed to click still counts there, and asserting over it
+         reports 0ms and looks like a pass. The count that matters is how many
+         distinct controls actually produced an interaction. */
+      const haveReading = measured.measuredReading > 0;
+      const haveRestyle = measured.measuredPreference > 0;
 
       // Reading interactions are what the plan's 200ms is about. An assertion
       // over an empty set passes trivially and looks like coverage, so when there
-      // are none the preference toggles are asserted in their place and the
-      // substitution is said out loud — the homepage is a list of links, and
-      // clicking a link navigates away rather than measuring anything.
-      const assertedOn = measured.readingControls > 0 ? measured.reading : measured.preference;
-      const assertedLabel = measured.readingControls > 0 ? 'INP (reading)' : 'INP (only control)';
+      // are none the restyles are asserted in their place and the substitution is
+      // said out loud — the homepage is a list of links, and clicking a link
+      // navigates away rather than measuring anything.
+      const assertedOn = haveReading ? measured.reading : measured.preference;
+      const assertedLabel = haveReading ? 'INP (reading)' : 'INP (only restyle)';
 
-      if (measured.readingControls === 0) {
-        console.log('    note  this page has no reading controls, only the preference toggles.');
+      if (!haveReading && !haveRestyle) {
+        /* Nothing was clicked at all. Reporting 0ms here would be the single most
+           dangerous thing this script could do — a silent pass on a page whose
+           interactions were never exercised. */
+        console.log('    note  NO control produced a measurable interaction on this page.');
+        failures++;
+      } else if (!haveReading) {
+        console.log('    note  this page has no reading controls, only whole-document restyles.');
         console.log('          Anchors are not clicked because a link navigates away.');
+      } else if (measured.measuredReading < measured.readingControls) {
+        console.log(
+          `    note  ${measured.readingControls} reading controls were selected but only ` +
+            `${measured.measuredReading} produced an interaction; the rest were off-screen.`,
+        );
       }
 
-      const row2 = row(assertedLabel, assertedOn, BUDGET.inpMs, 'ms');
-      console.log('    ' + row2.line.trimEnd());
-      if (!row2.good) failures++;
+      if (haveReading || haveRestyle) {
+        const row2 = row(assertedLabel, assertedOn, BUDGET.inpMs, 'ms');
+        console.log('    ' + row2.line.trimEnd());
+        if (!row2.good) failures++;
+      }
 
-      // Preference toggles are additionally guarded against getting worse than
-      // they already are, on every page, regardless of which set was asserted.
-      const prefRow = row('INP (pref toggle)', measured.preference, PREFERENCE_INP_MS, 'ms');
-      console.log('    ' + prefRow.line.trimEnd());
-      if (!prefRow.good) failures++;
+      /* Whole-document restyles are additionally guarded on every page,
+         regardless of which class was asserted — but only if any were actually
+         measured, or this would assert 0ms on a page with no restyles. */
+      if (haveRestyle) {
+        const prefRow = row('INP (restyle)', measured.preference, PREFERENCE_INP_MS, 'ms');
+        console.log('    ' + prefRow.line.trimEnd());
+        if (!prefRow.good) failures++;
+      }
       if (measured.preference > BUDGET.inpMs) {
         console.log(
-          `    note  preference toggles are over ${BUDGET.inpMs}ms. They restyle the whole document, so ` +
+          `    note  whole-document restyles are over ${BUDGET.inpMs}ms. They re-lay out every element, so ` +
             'this is the number to watch as the canon grows. See PREFERENCE_TOGGLE.',
         );
       }
