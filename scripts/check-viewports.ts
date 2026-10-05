@@ -36,6 +36,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { findChrome as sharedFindChrome } from './lib/chrome.mjs';
 
 const ROOT = process.cwd();
 const PORT = process.env.VIEWPORT_PORT ?? '4660';
@@ -71,30 +72,14 @@ function freePort(): Promise<number> {
  *
  * This list was Windows-only, which meant this gate could not find a browser on
  * `ubuntu-latest` even after CI installed one — so it failed on a machine that
- * had exactly what it asked for. `CHROME_PATH` comes first so a runner can point
- * at the binary it installed, and the Linux and macOS locations are here for the
- * same reason they are in field-metrics.mjs.
+ * had exactly what it asked for.
  *
- * The list is the same in field-metrics.mjs, check-xss.ts and here on purpose: a
- * gate that looks in a different place from its neighbours is a gate that works
- * on one machine and silently cannot run on another.
+ * Now one shared lookup, shared with every other gate that drives a browser. Six
+ * private copies of this list is how three of them ended up disagreeing about
+ * where a browser lives; see scripts/lib/chrome.mjs.
  */
 function findChrome(): string | null {
-  const c = [
-    process.env.CHROME_PATH,
-    `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env['PROGRAMFILES(X86)']}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env.PROGRAMFILES}\\Microsoft\\Edge\\Application\\msedge.exe`,
-    `${process.env['PROGRAMFILES(X86)']}\\Microsoft\\Edge\\Application\\msedge.exe`,
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-  ];
-  return c.find((x) => x && fs.existsSync(x)) ?? null;
+  return sharedFindChrome();
 }
 
 async function launchChrome(binary: string, port: number, profile: string) {

@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { requireChrome } from './lib/chrome.mjs';
 
 const ROOT = process.cwd();
 const PORT = process.env.DIGEST_PORT ?? '4520';
@@ -110,7 +111,12 @@ async function waitForServer(url: string, timeoutMs = 60_000) {
 }
 
 async function cdp() {
-  const chrome = `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`;
+  /* Used to build a path by interpolation and spawn it unchecked, so on a Linux
+     runner this spawned the literal string
+     `undefined\Google\Chrome\Application\chrome.exe` and died on an unhandled
+     spawn ENOENT — a stack trace rather than a sentence about the missing
+     browser. One shared lookup, and a refusal that says what is missing. */
+  const chrome = requireChrome('The digest gate reads cache headers through a browser');
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'strata-digest-'));
   const port = await freePort();
   const proc = spawn(

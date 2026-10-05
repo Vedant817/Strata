@@ -25,6 +25,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { findChrome as sharedFindChrome } from './lib/chrome.mjs';
 
 const ROOT = process.cwd();
 const PORT = process.env.FONT_PORT ?? '4404';
@@ -72,21 +73,8 @@ function freePort() {
 }
 
 function findChrome() {
-  const candidates = [
-    process.env.CHROME_PATH,
-    `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env['PROGRAMFILES(X86)']}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env.PROGRAMFILES}\\Microsoft\\Edge\\Application\\msedge.exe`,
-    `${process.env['PROGRAMFILES(X86)']}\\Microsoft\\Edge\\Application\\msedge.exe`,
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-  ].filter(Boolean);
-  return candidates.find((p) => fs.existsSync(p)) ?? null;
+  /* Shared with every other browser-driving gate; see scripts/lib/chrome.mjs. */
+  return sharedFindChrome();
 }
 
 async function waitForServer(url, timeoutMs = 60_000) {

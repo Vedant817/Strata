@@ -30,6 +30,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { findChrome as sharedFindChrome } from './lib/chrome.mjs';
 
 const ROOT = process.cwd();
 const PORT = process.env.STRESS_PORT ?? '4670';
@@ -648,31 +649,18 @@ async function main() {
 /**
  * Chrome, or null.
  *
- * Windows-only paths used to be the whole list, so on `ubuntu-latest` this gate
- * could not find a browser even once CI had installed one. `CHROME_PATH` leads so
- * a runner can name its binary, and the rest match the list its neighbours use.
- *
- * Null rather than an exit here is deliberate: this gate's XML assertions parse
+ * Null rather than an exit is deliberate here: this gate's XML assertions parse
  * with `DOMParser`, and the browser is only used for the short-lived
- * `chrome --dump-dom` cross-check. A runner without a browser should still get
- * the XML assertions rather than losing them — but the browser-only assertions
- * must then say they were skipped instead of quietly reporting success, so that
- * is handled where they are asserted, not here.
+ * `chrome --dump-dom` cross-check and the layout pass. A machine without a
+ * browser should still get the XML assertions rather than losing them — but the
+ * browser-only assertions must then say they were skipped instead of quietly
+ * reporting success, which is handled where they are asserted.
+ *
+ * One shared lookup now; this list used to be a private Windows-only copy that
+ * could not find a browser on a Linux runner. See scripts/lib/chrome.mjs.
  */
 async function findChromeOrNull(): Promise<string | null> {
-  const c = [
-    process.env.CHROME_PATH,
-    `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env['PROGRAMFILES(X86)']}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env.PROGRAMFILES}\\Microsoft\\Edge\\Application\\msedge.exe`,
-    `${process.env['PROGRAMFILES(X86)']}\\Microsoft\\Edge\\Application\\msedge.exe`,
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-  ];
-  return c.find((x) => x && fs.existsSync(x)) ?? null;
+  return sharedFindChrome();
 }
 
 try {

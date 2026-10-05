@@ -30,10 +30,11 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { findChrome as sharedFindChrome } from './lib/chrome.mjs';
 
 const ROOT = process.cwd();
 const PORT = process.env.XSS_PORT ?? '4620';
@@ -63,20 +64,10 @@ function freePort(): Promise<number> {
 }
 
 function findChrome(): string | null {
-  /* CHROME_PATH first, so a Linux runner can name the Chrome it installed. The
-     same list as field-metrics.mjs and check-viewports.ts: a gate that searches
-     somewhere its neighbours do not is a gate that cannot run on CI. */
-  const candidates = [
-    process.env.CHROME_PATH,
-    `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env['PROGRAMFILES(X86)']}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env.PROGRAMFILES}\\Microsoft\\Edge\\Application\\msedge.exe`,
-    `${process.env['PROGRAMFILES(X86)']}\\Microsoft\\Edge\\Application\\msedge.exe`,
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium',
-  ];
-  return candidates.find((c) => c && existsSync(c)) ?? null;
+  /* One shared lookup, shared with every other gate that drives a browser. This
+     list used to be a private copy that had drifted — see scripts/lib/chrome.mjs
+     for the three CI failures that came out of six disagreeing lists. */
+  return sharedFindChrome();
 }
 
 async function launchChrome(binary: string, port: number, profile: string) {

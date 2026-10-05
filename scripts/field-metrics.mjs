@@ -65,6 +65,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { findChrome as sharedFindChrome } from './lib/chrome.mjs';
 
 const ROOT = process.cwd();
 const PORT = process.env.FIELD_PORT ?? '4402';
@@ -227,23 +228,11 @@ function row(label, value, limit, unit) {
   };
 }
 
+/* One shared browser lookup, shared with every other gate that drives a browser.
+   Six private copies of this list is how three of them ended up disagreeing about
+   where a browser lives; see scripts/lib/chrome.mjs. */
 function findChrome() {
-  const candidates = [
-    process.env.CHROME_PATH,
-    `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env['PROGRAMFILES(X86)']}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env.PROGRAMFILES}\\Microsoft\\Edge\\Application\\msedge.exe`,
-    `${process.env['PROGRAMFILES(X86)']}\\Microsoft\\Edge\\Application\\msedge.exe`,
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-    '/snap/bin/chromium',
-  ].filter(Boolean);
-  return candidates.find((p) => fs.existsSync(p)) ?? null;
+  return sharedFindChrome();
 }
 
 /** An unused debugging port. Port 0 does not work: Lighthouse needs a real one
