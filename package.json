@@ -43,6 +43,7 @@
     "test:viewports": "tsx scripts/check-viewports.ts",
     "test:content": "tsx scripts/check-content-stress.ts",
     "test:reader": "tsx scripts/check-reader-facing-errors.ts",
+    "test:boot": "tsx scripts/check-boot.ts",
     "test:xss": "tsx scripts/check-xss.ts",
     "test:field": "node scripts/field-metrics.mjs",
     "test:fonts:browser": "node scripts/check-font-metrics.mjs"

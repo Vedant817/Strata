@@ -129,6 +129,14 @@ jobs:
       - name: Reader-facing errors
         run: npm run test:reader
 
+      # What happens when this is *deployed* wrong. Two failure modes that never
+      # appear in development and decide whether an onboarding reader meets a
+      # publication or an empty page: a missing DATABASE_URL silently serving an
+      # ephemeral local file, and a failed migration being swallowed so the app
+      # runs against a schema that does not match the code.
+      - name: Deployment failure modes
+        run: npm run test:boot
+
       # Whether a hostile query string becomes markup. Separate from the hostile
       # pass because the answer is not in the bytes: these payloads are inert by
       # escaping, so the only way to tell an inert reflection from a live one is to
