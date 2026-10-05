@@ -63,7 +63,11 @@ function freePort(): Promise<number> {
 }
 
 function findChrome(): string | null {
+  /* CHROME_PATH first, so a Linux runner can name the Chrome it installed. The
+     same list as field-metrics.mjs and check-viewports.ts: a gate that searches
+     somewhere its neighbours do not is a gate that cannot run on CI. */
   const candidates = [
+    process.env.CHROME_PATH,
     `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,
     `${process.env['PROGRAMFILES(X86)']}\\Google\\Chrome\\Application\\chrome.exe`,
     `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,

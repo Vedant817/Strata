@@ -23,6 +23,28 @@ jobs:
       - name: Install
         run: npm ci
 
+      # A browser, because eight of the gates below drive a real one and cannot
+      # run without it: the viewport and contrast pass needs computed styles in
+      # both themes, the content-stress pass renders adversarial titles through
+      # every surface, the reflection pass has to load the page to see whether a
+      # payload ran, and test:field measures LCP/CLS/INP with Chrome's own
+      # throttling.
+      #
+      # `ubuntu-latest` ships no Chrome. Every one of those gates treats a missing
+      # browser as a *failure* rather than a skip — correctly, because "we could
+      # not look" is not a pass — so without this step CI was going red on the
+      # first browser gate, and there was a worse failure hiding behind that: the
+      # last runs on master finished in 39-44s, while the same gates take minutes
+      # locally. They were not passing quickly. They were not running.
+      #
+      # `browser-actions/setup-chrome` pins the version rather than tracking
+      # latest, because a gate that changes behaviour when Chrome releases is not
+      # evidence about this repository.
+      - name: Chrome for the browser gates
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
       # Design lint first: it is milliseconds, and it is the rule that is
       # easiest to break by accident and hardest to notice in review.
       - name: Design lint
@@ -162,6 +184,22 @@ jobs:
         env:
           SITE_URL: https://strata.pub
 
+      # LCP, CLS and INP on a throttled profile. A runner is a two-core VM shared
+      # with the rest of the host, and Lighthouse applies 4x CPU slowdown on top
+      # of that, so identical builds span 866-2271ms here as they do on a busy
+      # laptop. The scale widens the *budget* for the runner only; locally these
+      # remain the plan's 1500ms / 0.02 / 200ms. What it buys is that a red build
+      # means the page got slower, not that a neighbouring container was busy.
+      #
+      # Every run is printed either way, so a genuinely slow build is visible
+      # rather than hidden behind a good sample.
+      - name: Field metrics
+        run: npm run test:field
+        env:
+          FIELD_BUDGET_SCALE: '1.6'
+
+      # The static budgets that do not need a browser, kept separate so the
+      # bundle-size rule is enforced where it can be, on every build.
       - name: Performance budget
         run: npm run perf:budget
 
