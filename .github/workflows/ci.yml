@@ -23,6 +23,24 @@ jobs:
       - name: Install
         run: npm ci
 
+      # A seeded database, before anything that reads one.
+      #
+      # This is a real content product: the synthesis, digest, loom and route
+      # gates assert that a format finds real material in real posts, and they
+      # were all being handed an empty canon. `test:synthesis` failed on a Linux
+      # runner with `the canon loaded: 0 posts`, and its five card and shape
+      # assertions failed as a consequence — not because synthesis broke, but
+      # because there was nothing to synthesise.
+      #
+      # The seed ran, but *late*: it sat below `test:field`, so every gate above
+      # it had already been asked to prove something about a publication with no
+      # posts in it. Locally the same gates pass because a developer's database is
+      # already seeded, which is precisely how this stayed invisible.
+      #
+      # A local libsql file, so there is no service container to start.
+      - name: Seed the database
+        run: npm run db:seed
+
       # A browser, because eight of the gates below drive a real one and cannot
       # run without it: the viewport and contrast pass needs computed styles in
       # both themes, the content-stress pass renders adversarial titles through
@@ -210,25 +228,15 @@ jobs:
       - name: Response compression
         run: npm run test:compress
 
-      # The plan's three numbers. Needs a browser, which ubuntu-latest has.
-      # Kept last and after the build because it audits the built server: a perf
-      # number measured against the dev server describes the dev server.
-      - name: Field metrics (LCP / CLS / INP)
-        run: npm run test:field
-
       # The return hook. Two claims that are not obvious from reading the code:
       # that the list is actually per-reader, and that one reader's history
       # cannot reach the next one. Driven through a browser because the caching
       # headers are part of the claim and only exist on the wire.
+      # The database was seeded at the top of this job, before any gate that reads
+      # one. This step no longer seeds; see that comment for why the order was
+      # wrong and what it cost.
       - name: Constellation digest
         run: npm run test:digest
-
-      # The database is a local libsql file and migrations run on first query,
-      # so CI needs no service container. Seeding gives the route check real
-      # posts to render rather than a wall of 404s. The smoke script boots the
-      # built server itself, so there is nothing to start by hand here.
-      - name: Seed
-        run: npm run db:seed
 
       - name: Route smoke test
         run: npm run test:smoke
